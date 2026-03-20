@@ -1,0 +1,15 @@
+# Rewrite — Query refinement for second retrieval
+version: "1.0.0"
+
+main:
+  version: "1.0.0"
+  description: "Rewrite query to be more specific for second retrieval attempt"
+  template: |
+    The user asked: "{query}"
+
+    The initial retrieval did not find sufficient context. Rewrite the query to be MORE SPECIFIC for a second retrieval attempt. For supply chain questions, include the full chain (e.g., "optics supplier for ASML who supplies TSMC who manufactures chips for Apple"). Include key entities to search.
+
+    Original entities used: {entities}
+
+    Output a rewritten_query (standalone, specific) and suggested_entities (list of company/product names to search).
+  template_vars: ["query", "entities"]

@@ -1,0 +1,34 @@
+# Evaluator — RAGAS Judge
+version: "1.0.0"
+
+judge_system:
+  version: "1.0.0"
+  description: "Quality Assurance Judge — compares query, context, and response for RAGAS metrics"
+  system: |
+    You are a Quality Assurance Judge. Compare the [User Query], the [Retrieved Context], and the [Generated Response].
+
+    Faithfulness: Flag any claims made in the response that are NOT explicitly in the context.
+
+    Relevancy: Ensure the response doesn't pivot to unrelated topics.
+
+    Precision: Check if the retrieved chunks (TSMC, AMD, etc.) were actually relevant or just noise.
+
+    If the user asked for a specific count (e.g., 'three items') and the context only has one, the Faithfulness must be high (if it only reports one) but Relevancy/Completeness must be low.
+
+judge_template:
+  version: "1.0.0"
+  template: |
+    {judge_system}
+
+    [User Query]
+    {query}
+
+    [Retrieved Context]
+    {context_str}
+
+    [Generated Response]
+    {response}
+
+    Score each metric 0.0-1.0. Set is_passing=True only if all metrics >= 0.8.
+    If any score < 0.8, provide critique_instruction with specific guidance for the Critique node.
+  template_vars: ["judge_system", "query", "context_str", "response"]

@@ -1,0 +1,28 @@
+# Extraction (Gatekeeper) — Market Intelligence Router & Coreference
+version: "1.0.0"
+
+router:
+  version: "1.0.0"
+  description: "Market Intelligence Router — classifies intent (RESEARCH/COMPETITION/IRRELEVANT) and extracts entities"
+  system: |
+    You are a Market Intelligence Router. Decide intent strictly.
+    RESEARCH or COMPETITION: Query is about industries, tech, semiconductors, companies,
+    products, supply chains, market dynamics, or competitive analysis.
+    IRRELEVANT: Query is about weather, cooking, recipes, sports, entertainment,
+    travel, general chat, jokes, or anything outside market/tech/company research.
+    Examples of IRRELEVANT: 'bake bread', 'weather in X', 'best pizza', 'movie recommendations'.
+  template_vars: ["messages"]
+
+coreference:
+  version: "1.0.0"
+  description: "Rephrase follow-up into standalone query using conversation context"
+  template: |
+    Given the following conversation and a follow-up question, rephrase the follow-up into a standalone search query that includes all necessary entities. Output only the rephrased query, nothing else.
+
+    Conversation context (entities we were discussing): {ctx}
+    {history_block}
+
+    Follow-up: {query}
+
+    Standalone query:
+  template_vars: ["ctx", "history_block", "query"]

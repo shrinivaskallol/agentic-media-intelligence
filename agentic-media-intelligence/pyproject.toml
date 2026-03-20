@@ -1,0 +1,100 @@
+[project]
+name = "agentic-media-intelligence"
+version = "0.1.0"
+description = "Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. Corrective RAG (CRAG) with query refinement and self-reflection loops."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+authors = [{ name = "Shri Kallol", url = "https://www.linkedin.com/in/shrinivas-kallol/" }]
+license = { text = "MIT" }
+keywords = ["rag", "langgraph", "graphrag", "neo4j", "llm", "agentic", "market-intelligence"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastparquet>=2025.12.0",
+    "gliclass>=0.1.0",
+    "gliner>=0.2.0",
+    "langchain-google-genai>=4.2.1",
+    "langchain-openai>=0.2.0",
+    "langchain-groq>=0.2.0",
+    "langgraph>=1.0.10",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "aiosqlite>=0.20",
+    "neo4j>=6.1.0",
+    "neo4j-driver>=5.28.3",
+    "numpy==1.26.4",
+    "pandas==2.2.2",
+    "psycopg2-binary>=2.9.11",
+    "pyarrow>=23.0.1",
+    "pyyaml>=6.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.2.2",
+    "redis>=7.3.0",
+    "scikit-learn==1.3.2",
+    "sentence-transformers==2.7.0",
+    "torch==2.2.2",
+    "transformers<4.41",
+    "rich>=13.0.0",
+    "fastapi>=0.115.0",
+    "fastmcp>=3.0.0",
+    "ragas>=0.4.3",
+    "instructor>=1.14.5",
+    "litellm>=1.82.3",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "pre-commit>=4.0.0",
+    "alembic>=1.18.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "pre-commit>=4.0.0",
+]
+
+[project.scripts]
+ami-workflow = "app.cli:run_workflow"
+ami-init-db = "app.cli:init_db"
+ami-migrate = "app.cli:migrate"
+ami-seed-postgres = "app.cli:seed_postgres"
+ami-seed-neo4j = "app.cli:seed_neo4j"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = [".venv", "__pycache__", "build", "dist", "*.egg-info"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501", "E402", "N806"]
+# E402: import not at top (scripts load .env before app imports)
+# N806: variable naming (ChatGroq etc.)
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require Docker (Neo4j, Postgres) to be running",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "scripts"]
+
+[tool.uv]
+# onnxruntime 1.24+ has no wheel for macOS Intel (x86_64); override to 1.19.x which does
+override-dependencies = [
+    "onnxruntime>=1.19.0,<1.24",
+]

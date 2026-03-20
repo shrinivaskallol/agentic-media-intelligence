@@ -39,31 +39,18 @@ AMI is a Corrective RAG (CRAG) system built on a cyclic state machine. It does n
 
 *Figure 1: The Agentic Workflow — closed-loop evaluation and critique cycle.*
 
-### Workflow Logic
-
-| Node | Responsibility | Principal Decision |
-|------|----------------|---------------------|
-| Extractor | Identifies entities and intent | Short-circuits to END if intent is IRRELEVANT |
-| Retrieve | Hybrid context retrieval | Fetches graph + vector evidence |
-| Grader | Pre-synthesis quality check | Routes to Rewrite if context insufficient |
-| Rewrite | Query refinement | Produces sharper query for re-retrieval |
-| Synthesis | Answer generation | Routes to Evaluator or Critique on refusal |
-| Evaluator | RAGAS faithfulness check | Routes to Critique if score < 0.8 |
-| Critique | Error correction | Forces regeneration with specific feedback |
-| Fallback | Safety net | Graceful response after max revisions |
-
 ### Trace Example: The Multi-Hop Challenge
 
 **Query:** "Identify the primary optics provider for Apple's 3nm chip manufacturer."
 
-| Step | Action |
-|------|--------|
-| **Extraction** | Maps "3nm manufacturer" → TSMC. Resolves intent to a Graph query: `MATCH (c:Company {name: 'TSMC'})-[:SUPPLIES]->(a:Company {name: 'Apple'})` |
-| **Initial Retrieval** | Confirms TSMC as manufacturer in Neo4j but finds no direct "optics" link. |
-| **Grader** | Flags "Context Insufficient" for the optics requirement; routes to Rewrite. |
-| **Rewrite** | Pivots: "Who supplies lithography optics to ASML for TSMC's 3nm process?" |
-| **Re-Retrieval** | Traverses 3-hop: Apple ← TSMC ← ASML ← Carl Zeiss AG. |
-| **Synthesis** | Delivers grounded, multi-tier intelligence report. |
+| Node | Responsibility | Action |
+|------|----------------|--------|
+| Extractor | Identifies entities and intent | Maps "3nm manufacturer" → TSMC. Resolves intent to a Graph query: `MATCH (c:Company {name: 'TSMC'})-[:SUPPLIES]->(a:Company {name: 'Apple'})` |
+| Retrieve | Hybrid context retrieval | Confirms TSMC as manufacturer in Neo4j but finds no direct "optics" link. |
+| Grader | Pre-synthesis quality check | Flags "Context Insufficient" for the optics requirement; routes to Rewrite. |
+| Rewrite | Query refinement | Pivots: "Who supplies lithography optics to ASML for TSMC's 3nm process?" |
+| Retrieve | Re-retrieval | Traverses 3-hop: Apple ← TSMC ← ASML ← Carl Zeiss AG. |
+| Synthesis | Answer generation | Delivers grounded, multi-tier intelligence report. |
 
 **Result:** The agent bridged a consumer-facing entity (Apple) and a deep-tier industrial supplier (Carl Zeiss AG) by inferring the implicit manufacturer (TSMC) and autonomously pivoting to the lithography layer (ASML) when the initial search hit a dead-end.
 
@@ -131,24 +118,43 @@ Copy `.env.example` and add your API keys.
 
 ```bash
 uv sync
-uv run python scripts/init_db.py
+uv run ami-migrate       # Postgres schema (news_articles, article_chunks, pgvector)
+uv run ami-init-db      # Neo4j + Redis
+uv run ami-seed-postgres # Synthetic vector data
+uv run ami-seed-neo4j   # Synthetic graph data
 ```
 
-Seeds the Knowledge Graph (Postgres, Neo4j, Redis).
+Or: `uv run python scripts/init_db.py` for init_db only.
 
-### 4. Test
+### 4. Run
 
 ```bash
-uv run python scripts/test_agentic_loop.py
+uv run ami-workflow
 ```
 
-Observes the self-correction loop in real time.
+Observes the self-correction loop in real time. Alternatively: `uv run python scripts/run_workflow.py`
+
+### 5. Test
+
+```bash
+uv run pytest tests/ -v
+```
+
+Integration tests (require Docker): `uv run pytest tests/ -v -m integration`
+
+### 6. Lint & Pre-commit
+
+```bash
+uv run ruff check app/ prompts/ tests/ scripts/
+pre-commit install   # optional: run hooks on git commit
+```
 
 ---
 
 ## Project Structure
 
 ```
+├── alembic/              # Postgres migrations (news_articles, article_chunks)
 ├── compose.yaml          # Neo4j, Postgres, Redis
 ├── pyproject.toml        # Dependencies (uv)
 ├── app/
@@ -156,9 +162,16 @@ Observes the self-correction loop in real time.
 │   ├── graph/            # LangGraph workflow definition
 │   ├── nodes/            # Extractor, Retriever, Grader, Synthesis, Evaluator, Critique
 │   └── tools/            # Vector + Graph retrieval
-└── scripts/
-    ├── init_db.py        # Seed databases
-    └── test_agentic_loop.py
+├── tests/                # Pytest tests (unit + integration)
+│   ├── conftest.py       # Shared fixtures
+│   ├── test_*.py
+│   └── eval_dataset.json # Golden dataset for run_evaluation
+└── scripts/              # Operational scripts (no tests)
+    ├── init_db.py        # Bootstrap Postgres, Neo4j, Redis
+    ├── seed_synthetic_postgres.py
+    ├── seed_synthetic_neo4j.py
+    ├── run_workflow.py   # Run CRAG workflow demo
+    └── run_evaluation.py # Run golden-dataset evaluation
 ```
 
 ---
@@ -172,5 +185,3 @@ Observes the self-correction loop in real time.
 | Redis | localhost:6379 |
 
 Credentials are configured in `compose.yaml` and `.env`.
-
-**MCP / Claude Desktop:** If the auto-intel tool disappears after an update, run `./scripts/fix_mcp_claude.sh` then restart Claude. See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).

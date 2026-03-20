@@ -1,0 +1,146 @@
+[
+  {
+    "id": "ev01",
+    "query": "What process node does Nvidia's Blackwell B200 use?",
+    "expected_entities": ["Nvidia", "Blackwell", "TSMC"],
+    "ground_truth_fact": "Blackwell B200 is manufactured using TSMC's 4NP process",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev02",
+    "query": "Who manufactures Blackwell chips?",
+    "expected_entities": ["Blackwell", "TSMC"],
+    "ground_truth_fact": "Blackwell is manufactured by TSMC",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev03",
+    "query": "What is Microsoft's relationship with OpenAI?",
+    "expected_entities": ["Microsoft", "OpenAI"],
+    "ground_truth_fact": "Microsoft has invested in OpenAI",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev04",
+    "query": "Tell me about the Stargate project.",
+    "expected_entities": ["Microsoft", "OpenAI", "Stargate"],
+    "ground_truth_fact": "Microsoft and OpenAI are developing Stargate, a $100 billion supercomputing project",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev05",
+    "query": "Does ASML supply equipment to TSMC?",
+    "expected_entities": ["ASML", "TSMC"],
+    "ground_truth_fact": "ASML supplies equipment to TSMC",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev06",
+    "query": "What memory does Samsung supply to Nvidia?",
+    "expected_entities": ["Samsung", "Nvidia"],
+    "ground_truth_fact": "Samsung supplies HBM to Nvidia",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev07",
+    "query": "Does Tesla use Nvidia hardware?",
+    "expected_entities": ["Tesla", "Nvidia"],
+    "ground_truth_fact": "Tesla uses hardware from Nvidia",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev08",
+    "query": "What is Apple's relationship with TSMC for chip manufacturing?",
+    "expected_entities": ["Apple", "TSMC"],
+    "ground_truth_fact": "Apple secured 3nm capacity from TSMC",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev09",
+    "query": "Does Nvidia develop CUDA?",
+    "expected_entities": ["Nvidia", "CUDA"],
+    "ground_truth_fact": "Nvidia developed CUDA",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev10",
+    "query": "How does AMD compete with Nvidia?",
+    "expected_entities": ["AMD", "Nvidia"],
+    "ground_truth_fact": "AMD competes with Nvidia in AI accelerators",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev11",
+    "query": "What is the NVLink bandwidth in Blackwell?",
+    "expected_entities": ["Nvidia", "Blackwell"],
+    "ground_truth_fact": "NVLink allows up to 576 GPUs at 1.8 TB/s in Blackwell",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev12",
+    "query": "What process does Apple's M4 use?",
+    "expected_entities": ["Apple", "M4"],
+    "ground_truth_fact": "Apple M4 is built on second-generation 3nm technology",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev13",
+    "query": "Does Meta buy chips from Nvidia?",
+    "expected_entities": ["Meta", "Nvidia"],
+    "ground_truth_fact": "Meta buys chips from Nvidia",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev14",
+    "query": "How much did Amazon invest in Anthropic?",
+    "expected_entities": ["Amazon", "Anthropic"],
+    "ground_truth_fact": "Amazon invested $4 billion in Anthropic",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev15",
+    "query": "What is Google's relationship with Anthropic?",
+    "expected_entities": ["Google", "Anthropic"],
+    "ground_truth_fact": "Google invested in Anthropic",
+    "category": "Graph Inference"
+  },
+  {
+    "id": "ev16",
+    "query": "Is CoWoS a bottleneck for AI chips?",
+    "expected_entities": ["TSMC", "CoWoS", "Nvidia", "AMD"],
+    "ground_truth_fact": "TSMC's CoWoS packaging is a critical bottleneck for AI chip production",
+    "category": "Direct Retrieval"
+  },
+  {
+    "id": "ev17",
+    "query": "Tell me about their latest chip architecture.",
+    "expected_entities": ["Nvidia"],
+    "ground_truth_fact": "Nvidia's Blackwell is manufactured using TSMC 4NP",
+    "category": "Coreference",
+    "note": "Requires prior context (e.g. 'Tell me about Nvidia' in previous turn)"
+  },
+  {
+    "id": "trap01",
+    "query": "Tell me about Nvidia's Rubin GPU architecture.",
+    "expected_entities": [],
+    "ground_truth_fact": "N/A - Rubin is not in synthetic data; agent should refuse or state data is insufficient",
+    "category": "Trap",
+    "expect_refusal": true
+  },
+  {
+    "id": "trap02",
+    "query": "What is AMD's Instinct MI500 accelerator?",
+    "expected_entities": [],
+    "ground_truth_fact": "N/A - MI500 not in data; we have MI300X only",
+    "category": "Trap",
+    "expect_refusal": true
+  },
+  {
+    "id": "trap03",
+    "query": "Tell me about Samsung's 1.4nm process node.",
+    "expected_entities": [],
+    "ground_truth_fact": "N/A - 1.4nm not in data; we have SF2 2nm",
+    "category": "Trap",
+    "expect_refusal": true
+  }
+]

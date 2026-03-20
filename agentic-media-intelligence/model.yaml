@@ -1,0 +1,117 @@
+# LLM Model Configuration
+# Defines model fallback chains, temperature, tokens, timeouts, and API settings
+# Use the fallback API key when we hit 429 (rate limit)
+
+# Gemini Configuration
+gemini:
+  # Primary API key location (checked in order)
+  api_key_locations:
+    - root: "GOOGLE_API_KEY"
+    - section: "[gemini] api_key"
+    - env: "GOOGLE_API_KEY"
+    - env: "GEMINI_API_KEY"
+
+  # Fallback API key location (optional)
+  fallback_key_locations:
+    - root: "GOOGLE_API_KEY_FALLBACK"
+    - section: "[gemini] api_key_fallback"
+    - env: "GOOGLE_API_KEY_FALLBACK"
+    - env: "GEMINI_API_KEY_FALLBACK"
+
+  # Model fallback chain (tried in order)
+  fallback_chain:
+    # Tier 1: Max free volume (1,000-1,500+ requests/day)
+    - "models/gemini-2.5-flash-lite"
+    - "models/gemini-2.0-flash-lite"
+
+    # Tier 2: Balanced reasoning (100-250 requests/day)
+    - "models/gemini-3-flash"
+    - "models/gemini-2.5-flash"
+    - "models/gemini-2.0-flash"
+    - "models/gemini-3-flash-preview"
+
+    # Tier 3: Deep reasoning & Pro (5-50 requests/day)
+    - "models/gemini-3-pro"
+    - "models/gemini-3-pro-deep-think"
+    - "models/gemini-2.5-pro"
+    - "models/gemini-2.5-pro-deep-think"
+
+    # Tier 4: Specialized & experimental
+    - "models/gemini-exp-1206"
+    - "models/gemini-3-pro-preview"
+
+  # Default generation config
+  default_config:
+    temperature: 0.1
+    response_mime_type: "application/json"
+
+  # Timeout settings
+  timeout_seconds: 20
+
+  # Error codes that trigger fallback
+  fallback_on_errors:
+    - "RESOURCE_EXHAUSTED"
+    - 429  # Rate limit
+    - 404  # Model not found
+    - "TIMEOUT"
+
+# Groq Configuration
+groq:
+  # API key location (checked in order)
+  api_key_locations:
+    - root: "GROQ_API_KEY"
+    - section: "[groq] api_key"
+    - section: "[gemini] GROQ_API_KEY"  # Fallback location
+    - env: "GROQ_API_KEY"
+
+  # Model fallback chain (tried in order)
+  # deepseek-r1-distill-llama-70b decommissioned Oct 2025 -> use llama-3.3-70b or gpt-oss
+  fallback_chain:
+    - "llama-3.3-70b-versatile"          # Primary (replacement for deprecated deepseek-r1)
+    - "openai/gpt-oss-120b"              # High-power reasoning
+    - "qwen/qwen3-32b"                   # Fast reasoning
+    - "llama-3.1-8b-instant"             # Ultra-fast fallback
+
+  # Model-specific configs (matched by pattern)
+  model_configs:
+    # Reasoning models (deepseek, qwen)
+    reasoning:
+      pattern: "(deepseek|qwen)"
+      temperature: 0.6
+      max_tokens: 2048
+
+    # GPT-OSS models
+    gpt_oss:
+      pattern: "gpt-oss"
+      temperature: 0.6
+      max_tokens: 2048
+      reasoning_effort: "medium"
+      include_reasoning: false
+
+    # Standard chat models (Llama)
+    standard:
+      pattern: "llama"
+      temperature: 0.1
+      max_tokens: 2048
+
+  # Default config (if no pattern matches)
+  default_config:
+    temperature: 0.1
+    max_tokens: 2048
+
+  # Error codes that trigger next model
+  retry_on_errors:
+    - "RateLimitError"
+    - 429
+
+# Fallback Strategy
+fallback_strategy:
+  # Order: try Gemini first, then Groq
+  providers: ["gemini", "groq"]
+
+  # When true: try Groq first, Gemini as fallback (use when Gemini hits 429 frequently)
+  prioritize_groq: true
+
+  # Logging
+  log_failures: true
+  log_success: true

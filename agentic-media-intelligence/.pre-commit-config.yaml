@@ -1,0 +1,10 @@
+# Pre-commit hooks. Install: pre-commit install
+# Run manually: pre-commit run --all-files
+# PEP 8: ruff check (lint + auto-fix) then ruff format (style)
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.7
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

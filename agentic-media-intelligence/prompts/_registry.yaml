@@ -1,0 +1,12 @@
+# Agentic Media Intelligence — Prompt Registry
+# Prompts are stored in separate files per node for modularity and version control.
+# Load via: from app.prompts import get_prompt, get_system, get_version
+#
+# Changelog:
+#   - 1.0.0: Initial registry; split by node (extraction, grader, rewrite, synthesis, critique, evaluator, evaluation)
+
+version: "1.0.0"
+schema_version: "1.0"
+updated_at: "2025-03-11"
+
+# Files: extraction.yaml, grader.yaml, rewrite.yaml, synthesis.yaml, critique.yaml, evaluator.yaml, evaluation.yaml

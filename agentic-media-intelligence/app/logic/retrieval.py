@@ -6,12 +6,14 @@ Returns triples with full entity property maps (headquarters, region) for LLM gr
 
 import logging
 import re
-from typing import Any, List
+from typing import Any
+
+from neo4j.exceptions import DriverError, ServiceUnavailable
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_graph_results(records: list[dict[str, Any]]) -> List[str]:
+def _parse_graph_results(records: list[dict[str, Any]]) -> list[str]:
     """
     Format Neo4j records into high-signal strings for the LLM.
     Extracts headquarters and region when available; falls back to N/A.
@@ -40,7 +42,7 @@ def _parse_graph_results(records: list[dict[str, Any]]) -> List[str]:
     return formatted
 
 
-def get_graph_context(entities: List[str], limit: int = 25) -> List[str]:
+def get_graph_context(entities: list[str], limit: int = 25) -> list[str]:
     """
     Expands context by finding neighbors of extracted entities in Neo4j.
     Uses variable-length paths (1..3 hops) for Tier-3 supply chain traversal.
@@ -57,9 +59,9 @@ def get_graph_context(entities: List[str], limit: int = 25) -> List[str]:
         driver = get_neo4j_driver()
         simple_ids = [e.lower().replace(" ", "_") for e in entities]
         canonical_ids = [re.sub(r"[\s\-_]", "", e.lower()) for e in entities]
-        composite_ids = [
-            f"ORGANIZATION_{e.lower().replace(' ', '_')}" for e in entities
-        ] + [f"PRODUCT_{e.lower().replace(' ', '_')}" for e in entities]
+        composite_ids = [f"ORGANIZATION_{e.lower().replace(' ', '_')}" for e in entities] + [
+            f"PRODUCT_{e.lower().replace(' ', '_')}" for e in entities
+        ]
         ids = list(dict.fromkeys(simple_ids + canonical_ids + composite_ids))
 
         query = """
@@ -88,7 +90,7 @@ def get_graph_context(entities: List[str], limit: int = 25) -> List[str]:
         driver.close()
 
         context_bits = _parse_graph_results(records)
-    except Exception as e:
+    except (ServiceUnavailable, DriverError, OSError) as e:
         logger.warning("get_graph_context failed: %s", e)
 
     return context_bits

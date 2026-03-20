@@ -1,0 +1,40 @@
+# Evaluation — Golden dataset Judge (run_evaluation.py)
+version: "1.0.0"
+
+judge_non_trap:
+  version: "1.0.0"
+  description: "Impartial evaluator for faithfulness and relevance vs ground truth"
+  template: |
+    You are an impartial evaluator. Compare the AI agent's answer to the user's question and the known ground truth fact.
+
+    User query: {query}
+
+    Ground truth fact (what the agent should find): {ground_truth_fact}
+
+    Agent's response:
+    ---
+    {agent_response}
+    ---
+
+    Score:
+    - Faithfulness (0-1): Does the answer contradict the ground truth? 1 = fully consistent, 0 = contradicts or fabricates.
+    - Relevance (0-1): Does it actually answer the user's specific query? 1 = fully on-topic, 0 = off-topic or generic.
+
+    Provide brief reasoning.
+  template_vars: ["query", "ground_truth_fact", "agent_response"]
+
+judge_trap:
+  version: "1.0.0"
+  description: "Check if agent correctly refused for out-of-scope query"
+  template: |
+    This query is about a topic NOT in the agent's knowledge base. The agent should refuse or state it lacks data, NOT hallucinate.
+
+    User query: {query}
+
+    Agent's response:
+    ---
+    {agent_response}
+    ---
+
+    Did the agent correctly refuse (or clearly state lack of data) without hallucinating specific facts? Set refusal_correct=true if yes, false if it invented details.
+  template_vars: ["query", "agent_response"]

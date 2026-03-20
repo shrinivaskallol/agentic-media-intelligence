@@ -1,0 +1,24 @@
+# Grader — Pre-synthesis quality check on retrieval
+version: "1.0.0"
+
+main:
+  version: "1.0.0"
+  description: "Retrieval quality grader — decides if context is sufficient to answer query"
+  template: |
+    You are a retrieval quality grader. Decide if the RETRIEVED CONTEXT below contains enough information to answer the USER QUERY.
+
+    CRITICAL RULE FOR PROVIDER/SUPPLIER QUERIES:
+    - If the user asks for a specific "provider", "supplier", "who supplies", or "who provides" X, the context MUST explicitly name that provider/supplier entity.
+    - If the context only mentions the downstream chain (e.g., Apple, TSMC, ASML) but NOT the requested provider/supplier (e.g., Carl Zeiss for optics), answer sufficient=False.
+    - Example: "Who supplies optics to Apple's chip manufacturer?" requires the optics provider (Carl Zeiss) to be present. TSMC and ASML alone are insufficient.
+
+    Answer strictly based on the context. For any query asking WHO provides or supplies something, the answer entity must appear in the context.
+
+    USER QUERY:
+    {query}
+
+    RETRIEVED CONTEXT:
+    {context_str}
+
+    Is the context sufficient to answer the query? Answer sufficient=True or sufficient=False.
+  template_vars: ["query", "context_str"]

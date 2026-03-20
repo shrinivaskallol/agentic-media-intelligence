@@ -1,0 +1,27 @@
+# Critique — Red Team auditor
+version: "1.0.0"
+
+main:
+  version: "1.0.0"
+  description: "Senior Technical Auditor — scores report against context (0.0-1.0)"
+  template: |
+    You are a Senior Technical Auditor. Score the following Market Intelligence Report against the provided Context Data.
+    {instruction_block}
+    REPORT:
+    {report}
+
+    CONTEXT DATA:
+    {context}
+
+    CRITIQUE CRITERIA:
+    1. Grounding: Does the report make claims not supported by the context?
+    2. Accuracy: Are technical specs (architecture names, dates) correct based ONLY on the context?
+    3. Completeness: Did the report miss key entities mentioned in the context?
+    4. CATEGORY ERRORS: Did the report treat a Person as a Location? Did it treat a Company as a Person?
+
+    SCORING:
+    - 1.0: Report is perfect, fully grounded, no errors. Set feedback to "PASS".
+    - 0.85-0.99: Minor issues, easily fixable.
+    - 0.5-0.84: Several issues; list specific corrections in feedback.
+    - 0.0-0.49: Major grounding failure or category errors.
+  template_vars: ["instruction_block", "report", "context"]
