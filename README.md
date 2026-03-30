@@ -1,6 +1,10 @@
 # agentic-media-intelligence
 
+[![CI](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml)
+
 Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
+
+Licensed under the [MIT License](LICENSE).
 
 **Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Streamlit](#streamlit-dashboard-optional) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
 
@@ -118,6 +122,44 @@ LLM-as-a-Judge is treated as a production requirement, not an afterthought. Metr
 
 ## Getting Started
 
+### Clone → run (happy path)
+
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/), [uv](https://docs.astral.sh/uv/getting-started/installation/), Python **3.10–3.12** (managed by `uv`).
+
+From an empty directory:
+
+```bash
+git clone https://github.com/shrinivaskallol/agentic-media-intelligence.git
+cd agentic-media-intelligence
+docker compose up -d
+cp .env.example .env
+```
+
+Edit **`.env`**: set `POSTGRES_PASSWORD`, `NEO4J_PASSWORD` (must match what you use in Compose), at least one LLM key (`GOOGLE_API_KEY` and/or `GROQ_API_KEY`), and `DATABASE_URL` / Neo4j settings if your ports differ from the defaults.
+
+```bash
+uv sync
+uv run ami-migrate        # Postgres (pgvector + article tables)
+uv run ami-init-db        # Neo4j constraints + Redis ping
+uv run ami-seed-postgres # Synthetic news chunks for embeddings
+uv run ami-seed-neo4j    # Synthetic graph for GraphRAG
+uv run pytest tests/ -v -m "not integration"   # optional: unit tests only
+```
+
+**Run the agent (pick one):**
+
+| Goal | Command |
+|------|---------|
+| Terminal demo | `uv run ami-workflow` |
+| MCP + SSE (tools / dashboard remote mode) | `uv run python src/mcp_server.py` |
+| Streamlit UI | `uv run streamlit run app/ui/dashboard.py` (use **Remote** if MCP is running) |
+
+**Integration tests** (Docker DBs + real keys): `uv run pytest tests/ -v -m integration`
+
+### Portfolio demo (2–3 minutes)
+
+Good for LinkedIn or interviews: show **Compose up → `.env` keys blurred → `uv sync` → seeds → one research query** in the Streamlit dashboard or MCP Inspector, then mention **CI** (lint + unit tests on GitHub Actions).
+
 ### 1. Infrastructure
 
 ```bash
@@ -128,7 +170,7 @@ Starts Neo4j, Postgres, and Redis.
 
 ### 2. Environment
 
-Copy `.env.example` and add your API keys.
+Copy `.env.example` to `.env` and set passwords plus API keys. Never commit `.env`.
 
 ### 3. Bootstrap
 
