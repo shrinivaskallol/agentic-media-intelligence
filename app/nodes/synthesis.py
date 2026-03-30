@@ -12,7 +12,7 @@ from app.llm_factory import get_llm
 logger = logging.getLogger(__name__)
 from app.prompts import get_prompt, get_system
 from app.state.schema import GraphState
-from app.utils.context_budget import budget_context_for_synthesis
+from app.utils.citations import build_numbered_context_for_llm
 
 
 def synthesis_node(state: GraphState | dict) -> dict:
@@ -23,9 +23,6 @@ def synthesis_node(state: GraphState | dict) -> dict:
     """
     query = getattr(state, "query", None) or (
         state.get("query", "") if isinstance(state, dict) else ""
-    )
-    context = getattr(state, "context", None) or (
-        state.get("context", []) if isinstance(state, dict) else []
     )
     intent = getattr(state, "intent", None) or (
         state.get("intent", "RESEARCH") if isinstance(state, dict) else "RESEARCH"
@@ -65,10 +62,8 @@ def synthesis_node(state: GraphState | dict) -> dict:
         revision_instruction="{revision_instruction}",
     )
 
-    # Budget context to stay under Groq 8B TPM (~6k); Gemini has higher limits
-    context_str = (
-        budget_context_for_synthesis(context) if context else "No relevant data retrieved."
-    )
+    # Numbered evidence (vectors first, then graph) — citations in the answer must use [1], [2], … only
+    context_str = build_numbered_context_for_llm(state)
 
     prompt = ChatPromptTemplate.from_messages(
         [

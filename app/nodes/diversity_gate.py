@@ -21,9 +21,23 @@ def _hitl_enabled() -> bool:
 
 def _min_context_chunks() -> int:
     try:
-        return max(1, int(os.environ.get("AMI_HITL_MIN_CONTEXT", "6")))
+        return max(1, int(os.environ.get("AMI_HITL_MIN_CONTEXT", "3")))
     except ValueError:
-        return 6
+        return 3
+
+
+def _retrieval_unit_count(state: GraphState) -> int:
+    """
+    Approximate "how much" was retrieved for MMR / diversity decisions.
+
+    ``state.context`` is usually two list items (graph block + vector block), so
+    ``len(context)`` alone is a poor signal. We use the max of: block count,
+    vector chunk IDs, and lines that look like graph triples.
+    """
+    ctx = list(state.context or [])
+    ids = list(getattr(state, "retrieved_ids", None) or [])
+    graph_facts = sum(str(block).count("GRAPH FACT:") for block in ctx)
+    return max(len(ctx), len(ids), graph_facts)
 
 
 def diversity_gate_node(state: GraphState) -> dict:
@@ -38,18 +52,19 @@ def diversity_gate_node(state: GraphState) -> dict:
     if getattr(state, "mmr_hitl_done", False):
         return {}
 
-    ctx = list(state.context or [])
+    units = _retrieval_unit_count(state)
     threshold = _min_context_chunks()
-    if len(ctx) < threshold:
+    if units < threshold:
         return {}
 
     payload = {
         "action": "set_mmr_lambda",
         "message": "Multiple retrieved sources; set diversity (MMR) λ in [0.0, 1.0].",
-        "current_context_chunks": len(ctx),
+        "retrieval_units": units,
+        "current_context_chunks": units,
         "suggested_lambda": 0.5,
     }
-    logger.info("HITL: interrupting for MMR λ (chunks=%d >= %d)", len(ctx), threshold)
+    logger.info("HITL: interrupting for MMR λ (retrieval_units=%d >= %d)", units, threshold)
 
     user_lambda = interrupt(payload)
     try:

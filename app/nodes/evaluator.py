@@ -100,12 +100,19 @@ async def evaluation_node(state: GraphState | dict) -> dict:
         answer_relevancy = max(0.0, min(1.0, float(metrics.answer_relevancy)))
         context_precision = max(0.0, min(1.0, float(metrics.context_precision)))
 
+        # Derive pass/fail from scores so borderline runs (e.g. 0.8,0.8,0.8) are not
+        # left failing when the Judge LLM sets is_passing inconsistently.
+        is_passing = (
+            faithfulness >= 0.8
+            and answer_relevancy >= 0.8
+            and context_precision >= 0.8
+        )
         ragas_dict = {
             "faithfulness": faithfulness,
             "answer_relevancy": answer_relevancy,
             "context_precision": context_precision,
             "critique_instruction": metrics.critique_instruction or "",
-            "is_passing": metrics.is_passing,
+            "is_passing": is_passing,
         }
 
         # Refuse only after Critique has run at least once (revision_count >= 1).
@@ -115,14 +122,14 @@ async def evaluation_node(state: GraphState | dict) -> dict:
             revision_count = state.get("revision_count", 0)
         revision_count = int(revision_count) if revision_count is not None else 0
 
-        is_refused = not metrics.is_passing and faithfulness >= 0.9 and revision_count >= 1
+        is_refused = not is_passing and faithfulness >= 0.9 and revision_count >= 1
 
         logger.info(
             "RAGAS Judge: faithfulness=%.2f relevancy=%.2f precision=%.2f pass=%s",
             faithfulness,
             answer_relevancy,
             context_precision,
-            metrics.is_passing,
+            is_passing,
         )
 
         return {
