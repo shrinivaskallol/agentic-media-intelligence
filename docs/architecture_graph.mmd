@@ -1,0 +1,38 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	extractor(extractor)
+	retrieve(retrieve)
+	diversity_gate(diversity_gate)
+	grader(grader)
+	rewrite(rewrite)
+	synthesis(synthesis)
+	evaluator(evaluator)
+	critique(critique)
+	fallback(fallback)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> extractor;
+	critique -. &nbsp;finish&nbsp; .-> __end__;
+	critique -.-> fallback;
+	critique -. &nbsp;refine&nbsp; .-> synthesis;
+	diversity_gate -.-> grader;
+	diversity_gate -. &nbsp;re_retrieve&nbsp; .-> retrieve;
+	evaluator -. &nbsp;finish&nbsp; .-> __end__;
+	evaluator -.-> critique;
+	extractor -. &nbsp;end&nbsp; .-> __end__;
+	extractor -. &nbsp;continue&nbsp; .-> retrieve;
+	grader -. &nbsp;rewrite_query&nbsp; .-> rewrite;
+	grader -. &nbsp;generate_response&nbsp; .-> synthesis;
+	retrieve --> diversity_gate;
+	rewrite --> retrieve;
+	synthesis -.-> critique;
+	synthesis -.-> evaluator;
+	synthesis -.-> fallback;
+	fallback --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

@@ -22,15 +22,28 @@ def main() -> None:
     app = build_workflow()
     runnable = app.get_graph()
 
-    out_path = _root / "docs" / "architecture_graph.png"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_dir = _root / "docs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mermaid_path = out_dir / "architecture_graph.mmd"
+    out_path = out_dir / "architecture_graph.png"
+
+    mermaid_src = runnable.draw_mermaid()
+    mermaid_path.write_text(mermaid_src, encoding="utf-8")
+    logger.info("Wrote Mermaid source to %s (diffable; open in mermaid.live)", mermaid_path)
+
+    if "diversity_gate" not in mermaid_src:
+        logger.warning(
+            "Mermaid output has no 'diversity_gate' — check app/graph/entity_workflow.py"
+        )
+    else:
+        logger.info("Diagram includes diversity_gate (HITL / MMR gate node)")
 
     png_bytes = runnable.draw_mermaid_png(output_file_path=str(out_path))
     if png_bytes and not out_path.exists():
         with open(out_path, "wb") as f:
             f.write(png_bytes)
 
-    logger.info("Exported graph to %s", out_path)
+    logger.info("Exported graph PNG to %s", out_path)
 
 
 if __name__ == "__main__":
