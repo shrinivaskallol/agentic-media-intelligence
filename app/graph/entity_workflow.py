@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from langgraph.graph import END, StateGraph
 
 from app.nodes.critique import critique_node
+from app.nodes.diversity_gate import diversity_gate_node
 from app.nodes.evaluator import evaluation_node
 from app.nodes.extraction import entity_extractor
 from app.nodes.fallback import fallback_node
@@ -94,6 +95,18 @@ def _should_continue(state: GraphState | dict) -> str:
     return "refine"
 
 
+def _route_after_diversity(state: GraphState | dict) -> str:
+    """After HITL sets λ, re-run retrieve for MMR; otherwise continue to grader."""
+    pending = getattr(state, "pending_mmr_refetch", None)
+    if pending is None and isinstance(state, dict):
+        pending = state.get("pending_mmr_refetch", False)
+    pending = bool(pending)
+    if pending:
+        logger.info("DIVERSITY: pending MMR re-fetch; routing to retrieve")
+        return "re_retrieve"
+    return "grader"
+
+
 def _grader_route(state: GraphState | dict) -> str:
     """
     Agentic loop: If context sufficient or retrieval_revision_count >= 2, proceed to synthesis.
@@ -149,6 +162,7 @@ def build_workflow(checkpointer=None):
 
     workflow.add_node("extractor", timed_node(entity_extractor, "extractor"))
     workflow.add_node("retrieve", timed_node(hybrid_retrieval_node, "retrieve"))
+    workflow.add_node("diversity_gate", timed_node(diversity_gate_node, "diversity_gate"))
     workflow.add_node("grader", timed_node(grader_node, "grader"))
     workflow.add_node("rewrite", timed_node(rewrite_node, "rewrite"))
     workflow.add_node("synthesis", timed_node(synthesis_node, "synthesis"))
@@ -167,7 +181,15 @@ def build_workflow(checkpointer=None):
         },
     )
 
-    workflow.add_edge("retrieve", "grader")
+    workflow.add_edge("retrieve", "diversity_gate")
+    workflow.add_conditional_edges(
+        "diversity_gate",
+        _route_after_diversity,
+        {
+            "re_retrieve": "retrieve",
+            "grader": "grader",
+        },
+    )
     workflow.add_conditional_edges(
         "grader",
         _grader_route,

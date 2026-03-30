@@ -22,9 +22,9 @@ class GraphState(BaseModel):
         description="Router intent: RESEARCH, COMPETITION, or IRRELEVANT.",
     )
 
-    context: Annotated[list[str], operator.add] = Field(
+    context: list[str] = Field(
         default_factory=list,
-        description="Accumulated data from Vector and Graph lookups.",
+        description="Retrieved graph + vector context (replaced each retrieve).",
     )
 
     response: str = Field(
@@ -85,6 +85,21 @@ class GraphState(BaseModel):
     retrieval_revision_count: Annotated[int, operator.add] = Field(
         default=0,
         description="Agentic loop: increments on each rewrite->retrieve cycle; max 2.",
+    )
+
+    mmr_lambda: float = Field(
+        default=1.0,
+        description="MMR diversity weight [0,1] after HITL resume; 1.0 = relevance-only default.",
+    )
+
+    pending_mmr_refetch: bool = Field(
+        default=False,
+        description="After HITL resume: route to retrieve again with mmr_lambda for MMR re-ranking.",
+    )
+
+    mmr_hitl_done: bool = Field(
+        default=False,
+        description="True after human set λ once; prevents repeated interrupts on same run.",
     )
 
     history: list[dict] = Field(

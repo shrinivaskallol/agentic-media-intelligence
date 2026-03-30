@@ -149,6 +149,33 @@ uv run ruff check app/ prompts/ tests/ scripts/
 pre-commit install   # optional: run hooks on git commit
 ```
 
+### 7. MCP server (development)
+
+Run the MCP server with **SSE** on port 8000 (reachable on your LAN/Docker via `0.0.0.0`):
+
+```bash
+uv run python src/mcp_server.py
+```
+
+- **Stdio** (Cursor “command” style): `uv run python src/mcp_server.py --stdio`
+- **Port**: override with `MCP_PORT=9000` (default `8000`)
+
+**MCP Inspector** (browser UI to list tools and call them):
+
+```bash
+npx @modelcontextprotocol/inspector http://localhost:8000/sse
+```
+
+Opens a UI (often at http://localhost:6274). In the transport dropdown choose **SSE**, then **Connect**. You should see tools such as `research_company`.
+
+**Cursor**: Settings → Features → MCP → Add server → type **SSE** → URL `http://localhost:8000/sse`.
+
+While a tool runs, **LangGraph progress** (node starts, tool starts) is printed to the **server terminal** (stderr), so you can watch the workflow from the process that started `mcp_server.py`.
+
+**HITL / MMR λ (optional):** Set `AMI_HITL_DIVERSITY=1` in `.env`. After retrieval, if there are at least `AMI_HITL_MIN_CONTEXT` context chunks (default `6`), the graph **interrupts** so you can choose diversity. Use the same `thread_id` on `research_company`, then call MCP tool **`resume_research`** with `lambda_value` between `0.0` and `1.0`. If HITL is off, `research_company` streams node events as before.
+
+Dependencies: `fastmcp` and `uvicorn` (HTTP/SSE transport) are listed in `pyproject.toml`.
+
 ---
 
 ## Project Structure
@@ -157,6 +184,8 @@ pre-commit install   # optional: run hooks on git commit
 ├── alembic/              # Postgres migrations (news_articles, article_chunks)
 ├── compose.yaml          # Neo4j, Postgres, Redis
 ├── pyproject.toml        # Dependencies (uv)
+├── src/
+│   └── mcp_server.py     # MCP server (SSE on :8000 by default; --stdio for Cursor command)
 ├── app/
 │   ├── state/            # GraphState schema
 │   ├── graph/            # LangGraph workflow definition
