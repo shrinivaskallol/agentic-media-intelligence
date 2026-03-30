@@ -1,11 +1,5 @@
 # agentic-media-intelligence
 
-[![CI](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml)
-
-![Streamlit dashboard — executive summary with numeric citations [1], [2], …](docs/streamlit-executive-summary.png)
-
-*Hero image is an illustrative UI mockup (numeric citations visible); **swap in your own Streamlit screenshot** via [docs/DEMO.md](docs/DEMO.md) if you prefer. For instant validation without cloning, see [public LangSmith traces](#evidence-of-resilience-traces).*
-
 Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
 
 Licensed under the [MIT License](LICENSE).
