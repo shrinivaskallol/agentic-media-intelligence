@@ -2,11 +2,15 @@
 
 [![CI](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml)
 
+![Streamlit dashboard — executive summary with numeric citations [1], [2], …](docs/streamlit-executive-summary.png)
+
+*Hero image is an illustrative UI mockup (numeric citations visible); **swap in your own Streamlit screenshot** via [docs/DEMO.md](docs/DEMO.md) if you prefer. For instant validation without cloning, see [public LangSmith traces](#evidence-of-resilience-traces).*
+
 Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
 
 Licensed under the [MIT License](LICENSE).
 
-**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Streamlit](#streamlit-dashboard-optional) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
+**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Data & reproducibility](#data--reproducibility) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Streamlit](#streamlit-dashboard-optional) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
 
 ---
 
@@ -109,7 +113,17 @@ LLM-as-a-Judge is treated as a production requirement, not an afterthought. Metr
 
 ---
 
+## Data & reproducibility
+
+**Synthetic seeds:** The repo ships **deterministic bootstrap** commands (`uv run ami-seed-postgres`, `uv run ami-seed-neo4j`) that populate local **Postgres (pgvector)** and **Neo4j** with high-fidelity **synthetic** semiconductor / supply-chain scenario data. Same scripts every clone — no manual CSV handoffs — so evals and demos start from a known graph + vector baseline.
+
+**Stateless notebooks:** `notebooks/` holds optional EDA / data-prep flows. **Execution outputs are cleared** (no saved tracebacks or machine-local paths) so the repo stays **portable** and **privacy-safe** for anyone who opens them — a deliberate choice to separate “exploration artifacts” from the committed product surface.
+
+---
+
 ## Evidence of Resilience (Traces)
+
+**Instant validation (no Docker / API keys):** Use the public **LangSmith** links below to inspect real runs (multi-hop GraphRAG, refusal, self-correction). For a UI demo, add a short screen recording (e.g. Streamlit + one query) and link it from your portfolio post.
 
 | Case | Description | Trace |
 |------|-------------|-------|
@@ -136,6 +150,14 @@ cp .env.example .env
 ```
 
 Edit **`.env`**: set `POSTGRES_PASSWORD`, `NEO4J_PASSWORD` (must match what you use in Compose), at least one LLM key (`GOOGLE_API_KEY` and/or `GROQ_API_KEY`), and `DATABASE_URL` / Neo4j settings if your ports differ from the defaults.
+
+**Human-in-the-loop (optional):** To enable the **diversity gate** (graph pauses after retrieval so you can set **MMR λ** in Streamlit or via MCP `resume_research`), add to `.env`:
+
+```bash
+AMI_HITL_DIVERSITY=1
+```
+
+Without this, the workflow runs straight through with default λ. Restart the MCP server after changing HITL variables.
 
 ```bash
 uv sync
