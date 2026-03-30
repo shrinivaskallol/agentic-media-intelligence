@@ -2,6 +2,8 @@
 
 Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
 
+**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
+
 ---
 
 ## The Problem
@@ -31,13 +33,24 @@ AMI is a Corrective RAG (CRAG) system built on a cyclic state machine. It does n
 - **Pattern:** Self-Reflection
 - **Function:** The Evaluator (using RAGAS metrics) acts as a unit test. If the synthesis is not fully grounded in the facts, the Critique node identifies the hallucination and forces a regeneration.
 
+**Retrieval diversity (optional HITL)** (retrieve → diversity_gate → [human λ] → retrieve → grader)
+
+- **Pattern:** Human-in-the-loop checkpoint + **Maximal Marginal Relevance (MMR)** on pgvector results
+- **Function:** Vector retrieval can be re-ranked for diversity using λ ∈ [0.0, 1.0] (1.0 ≈ relevance-only; lower λ favors dissimilar chunks). When enabled via environment variables, the graph may **interrupt** after retrieval so an operator can submit λ; the workflow then **re-runs retrieval** with that λ before the Grader. Requires a LangGraph **checkpointer** (in-memory for the MCP server when HITL is on).
+
 ---
 
 ## System Architecture
 
 ![System Architecture](docs/architecture_graph.png)
 
-*Figure 1: The Agentic Workflow — closed-loop evaluation and critique cycle.*
+*Figure 1: The Agentic Workflow — closed-loop evaluation and critique cycle (includes optional diversity gate / MMR re-fetch when HITL is enabled).*
+
+**Updating this figure:** The README always points at `docs/architecture_graph.png`. Running the exporter **overwrites that file**; you do **not** need to edit the README image path.
+
+```bash
+uv run python scripts/export_graph.py   # writes docs/architecture_graph.png (requires Graphviz for PNG)
+```
 
 ### Trace Example: The Multi-Hop Challenge
 
@@ -63,6 +76,7 @@ AMI is a Corrective RAG (CRAG) system built on a cyclic state machine. It does n
 | **Why GraphRAG (Neo4j)?** | Vector search excels at nuance but fails at relationship traversal. To answer "Who is the optics provider for Apple's 3nm manufacturer?", the system must perform a 3-hop traversal. Neo4j provides the structural truth that vector DBs lack. |
 | **Why Stateful LangGraph?** | A stateful managed graph maintains a Revision Count and Search History. This prevents infinite loops and allows the system to remember what it already tried during the rewrite phase. |
 | **Why Hybrid Retrieval?** | Neo4j (structural) + PGVector (semantic) capture both hard links between companies and soft sentiment in news text. |
+| **Why MMR / optional HITL?** | Top-k similarity can return redundant passages. MMR trades off query relevance vs. diversity among selected chunks; optional interrupts let an operator set λ when redundancy risk is high (e.g. investigative review). |
 
 ---
 
@@ -151,14 +165,18 @@ pre-commit install   # optional: run hooks on git commit
 
 ### 7. MCP server (development)
 
-Run the MCP server with **SSE** on port 8000 (reachable on your LAN/Docker via `0.0.0.0`):
+<a id="mcp-and-hitl"></a>
+
+Run the MCP server with **SSE** on port 8000 (reachable on your LAN via `0.0.0.0`):
 
 ```bash
 uv run python src/mcp_server.py
 ```
 
+On startup, stderr prints `[MCP config] …` so you can confirm whether **HITL** is enabled (reads `.env`; see below).
+
 - **Stdio** (Cursor “command” style): `uv run python src/mcp_server.py --stdio`
-- **Port**: override with `MCP_PORT=9000` (default `8000`)
+- **Port**: `MCP_PORT=9000` (default `8000`)
 
 **MCP Inspector** (browser UI to list tools and call them):
 
@@ -166,15 +184,44 @@ uv run python src/mcp_server.py
 npx @modelcontextprotocol/inspector http://localhost:8000/sse
 ```
 
-Opens a UI (often at http://localhost:6274). In the transport dropdown choose **SSE**, then **Connect**. You should see tools such as `research_company`.
+Opens a UI (often at http://localhost:6274). Choose **SSE**, then **Connect**. Tools include **`research_company`** (query + `thread_id`) and **`resume_research`** (`thread_id` + `lambda_value`).
 
-**Cursor**: Settings → Features → MCP → Add server → type **SSE** → URL `http://localhost:8000/sse`.
+**Cursor:** Settings → Features → MCP → Add server → **SSE** → `http://localhost:8000/sse`.
 
-While a tool runs, **LangGraph progress** (node starts, tool starts) is printed to the **server terminal** (stderr), so you can watch the workflow from the process that started `mcp_server.py`.
+**Observability**
 
-**HITL / MMR λ (optional):** Set `AMI_HITL_DIVERSITY=1` in `.env`. After retrieval, if there are at least `AMI_HITL_MIN_CONTEXT` context chunks (default `6`), the graph **interrupts** so you can choose diversity. Use the same `thread_id` on `research_company`, then call MCP tool **`resume_research`** with `lambda_value` between `0.0` and `1.0`. If HITL is off, `research_company` streams node events as before.
+| Mode | `research_company` | `resume_research` |
+|------|---------------------|-------------------|
+| HITL **off** | Streams node/tool events to the server terminal (`astream_events`) | N/A |
+| HITL **on** | Runs until interrupt or completion (`ainvoke`); returns **JSON** with `"status": "interrupted"` when paused | Streams node/tool events to the server terminal (`astream_events`) |
 
-Dependencies: `fastmcp` and `uvicorn` (HTTP/SSE transport) are listed in `pyproject.toml`.
+**Human-in-the-loop (HITL) and MMR λ**
+
+1. Copy **`.env.example` → `.env`** and set API keys. Never commit `.env`.
+2. Enable diversity gate + interrupt path:
+
+   | Variable | Purpose |
+   |----------|---------|
+   | `AMI_HITL_DIVERSITY` | `1`, `true`, or `yes` to enable; anything else disables HITL |
+   | `AMI_HITL_MIN_CONTEXT` | Interrupt when `len(state.context) >=` this value (integer ≥ 1) |
+
+3. **Restart** `mcp_server.py` after changing `.env`. The server loads `.env` with override so these values take effect.
+
+**Threshold note:** After `retrieve`, `context` is typically **two** list items (graph block + vector block). The default **`AMI_HITL_MIN_CONTEXT=6`** therefore **never** fires. For local testing, use `AMI_HITL_MIN_CONTEXT=1` or `2`; raise it in production when you want interrupts only for “heavy” context.
+
+**Tool flow**
+
+1. Call **`research_company`** with your **query** and a stable **`thread_id`** per conversation.
+2. If the response is interrupt JSON → call **`resume_research`** with the **same `thread_id`** and **`lambda_value`** in **[0.0, 1.0]**.
+3. `resume_research` completes the run and prints intermediate **node start** lines on the MCP process stderr.
+
+**CLI smoke test (HITL + resume without Inspector):**
+
+```bash
+AMI_HITL_DIVERSITY=1 AMI_HITL_MIN_CONTEXT=2 uv run python scripts/test_hitl_mmr.py
+```
+
+Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
 
 ---
 
@@ -184,13 +231,15 @@ Dependencies: `fastmcp` and `uvicorn` (HTTP/SSE transport) are listed in `pyproj
 ├── alembic/              # Postgres migrations (news_articles, article_chunks)
 ├── compose.yaml          # Neo4j, Postgres, Redis
 ├── pyproject.toml        # Dependencies (uv)
+├── docs/
+│   └── architecture_graph.png  # Generated; see scripts/export_graph.py
 ├── src/
 │   └── mcp_server.py     # MCP server (SSE on :8000 by default; --stdio for Cursor command)
 ├── app/
-│   ├── state/            # GraphState schema
+│   ├── state/            # GraphState schema (incl. mmr_lambda, HITL flags)
 │   ├── graph/            # LangGraph workflow definition
-│   ├── nodes/            # Extractor, Retriever, Grader, Synthesis, Evaluator, Critique
-│   └── tools/            # Vector + Graph retrieval
+│   ├── nodes/            # Extractor, Retriever, diversity_gate, Grader, Synthesis, …
+│   └── tools/            # Vector (MMR-capable) + Graph retrieval
 ├── tests/                # Pytest tests (unit + integration)
 │   ├── conftest.py       # Shared fixtures
 │   ├── test_*.py
@@ -200,17 +249,19 @@ Dependencies: `fastmcp` and `uvicorn` (HTTP/SSE transport) are listed in `pyproj
     ├── seed_synthetic_postgres.py
     ├── seed_synthetic_neo4j.py
     ├── run_workflow.py   # Run CRAG workflow demo
-    └── run_evaluation.py # Run golden-dataset evaluation
+    ├── run_evaluation.py # Run golden-dataset evaluation
+    ├── export_graph.py   # Regenerate docs/architecture_graph.png from LangGraph
+    └── test_hitl_mmr.py  # Optional local HITL + MMR smoke test
 ```
 
 ---
 
 ## Services (after `docker compose up -d`)
 
-| Service | Port |
-|---------|------|
+| Service | Port / URL |
+|---------|------------|
 | Neo4j Browser | http://localhost:7474 |
-| Postgres | localhost:5432 |
+| Postgres (host → container) | **localhost:5433** → 5432 |
 | Redis | localhost:6379 |
 
-Credentials are configured in `compose.yaml` and `.env`.
+Match `DATABASE_URL` / `POSTGRES_PORT` in `.env` to **5433** on the host unless you change `compose.yaml`. Credentials are set in `compose.yaml` and `.env`.
