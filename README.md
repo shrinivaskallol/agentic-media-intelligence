@@ -1,8 +1,16 @@
 # agentic-media-intelligence
 
+[![CI](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml)
+
+![Streamlit dashboard — executive summary with numeric citations [1], [2], …](docs/streamlit-executive-summary.png)
+
+*Hero image is an illustrative UI mockup (numeric citations visible); **swap in your own Streamlit screenshot** via [docs/DEMO.md](docs/DEMO.md) if you prefer. For instant validation without cloning, see [public LangSmith traces](#evidence-of-resilience-traces).*
+
 Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
 
-**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
+Licensed under the [MIT License](LICENSE).
+
+**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Data & reproducibility](#data--reproducibility) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Streamlit](#streamlit-dashboard-optional) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
 
 ---
 
@@ -105,7 +113,17 @@ LLM-as-a-Judge is treated as a production requirement, not an afterthought. Metr
 
 ---
 
+## Data & reproducibility
+
+**Synthetic seeds:** The repo ships **deterministic bootstrap** commands (`uv run ami-seed-postgres`, `uv run ami-seed-neo4j`) that populate local **Postgres (pgvector)** and **Neo4j** with high-fidelity **synthetic** semiconductor / supply-chain scenario data. Same scripts every clone — no manual CSV handoffs — so evals and demos start from a known graph + vector baseline.
+
+**Stateless notebooks:** `notebooks/` holds optional EDA / data-prep flows. **Execution outputs are cleared** (no saved tracebacks or machine-local paths) so the repo stays **portable** and **privacy-safe** for anyone who opens them — a deliberate choice to separate “exploration artifacts” from the committed product surface.
+
+---
+
 ## Evidence of Resilience (Traces)
+
+**Instant validation (no Docker / API keys):** Use the public **LangSmith** links below to inspect real runs (multi-hop GraphRAG, refusal, self-correction). For a UI demo, add a short screen recording (e.g. Streamlit + one query) and link it from your portfolio post.
 
 | Case | Description | Trace |
 |------|-------------|-------|
@@ -118,6 +136,52 @@ LLM-as-a-Judge is treated as a production requirement, not an afterthought. Metr
 
 ## Getting Started
 
+### Clone → run (happy path)
+
+**Prerequisites:** [Docker](https://docs.docker.com/get-docker/), [uv](https://docs.astral.sh/uv/getting-started/installation/), Python **3.10–3.12** (managed by `uv`).
+
+From an empty directory:
+
+```bash
+git clone https://github.com/shrinivaskallol/agentic-media-intelligence.git
+cd agentic-media-intelligence
+docker compose up -d
+cp .env.example .env
+```
+
+Edit **`.env`**: set `POSTGRES_PASSWORD`, `NEO4J_PASSWORD` (must match what you use in Compose), at least one LLM key (`GOOGLE_API_KEY` and/or `GROQ_API_KEY`), and `DATABASE_URL` / Neo4j settings if your ports differ from the defaults.
+
+**Human-in-the-loop (optional):** To enable the **diversity gate** (graph pauses after retrieval so you can set **MMR λ** in Streamlit or via MCP `resume_research`), add to `.env`:
+
+```bash
+AMI_HITL_DIVERSITY=1
+```
+
+Without this, the workflow runs straight through with default λ. Restart the MCP server after changing HITL variables.
+
+```bash
+uv sync
+uv run ami-migrate        # Postgres (pgvector + article tables)
+uv run ami-init-db        # Neo4j constraints + Redis ping
+uv run ami-seed-postgres # Synthetic news chunks for embeddings
+uv run ami-seed-neo4j    # Synthetic graph for GraphRAG
+uv run pytest tests/ -v -m "not integration"   # optional: unit tests only
+```
+
+**Run the agent (pick one):**
+
+| Goal | Command |
+|------|---------|
+| Terminal demo | `uv run ami-workflow` |
+| MCP + SSE (tools / dashboard remote mode) | `uv run python src/mcp_server.py` |
+| Streamlit UI | `uv run streamlit run app/ui/dashboard.py` (use **Remote** if MCP is running) |
+
+**Integration tests** (Docker DBs + real keys): `uv run pytest tests/ -v -m integration`
+
+### Portfolio demo (2–3 minutes)
+
+Good for LinkedIn or interviews: show **Compose up → `.env` keys blurred → `uv sync` → seeds → one research query** in the Streamlit dashboard or MCP Inspector, then mention **CI** (lint + unit tests on GitHub Actions).
+
 ### 1. Infrastructure
 
 ```bash
@@ -128,7 +192,7 @@ Starts Neo4j, Postgres, and Redis.
 
 ### 2. Environment
 
-Copy `.env.example` and add your API keys.
+Copy `.env.example` to `.env` and set passwords plus API keys. Never commit `.env`.
 
 ### 3. Bootstrap
 
@@ -233,14 +297,21 @@ Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
 ### 8. Streamlit dashboard (optional)
 
 ```bash
-# Terminal 1: MCP + dashboard routes on :8000
+# Terminal 1 — MCP must be up for Remote mode (SSE routes on MCP port, default :8000)
 uv run python src/mcp_server.py
 
-# Terminal 2:
+# Terminal 2
 uv run streamlit run app/ui/dashboard.py
 ```
 
-Choose **Remote (SSE → MCP)** for live **node pulse** over HTTP, or **Local (in-process)** to call `build_workflow()` directly (trace appears when the run finishes). With HITL enabled, an interrupt surfaces the **Diversity intervention** card; use **Resume with λ** to call the resume SSE (or local) path.
+| Mode | What it does |
+|------|----------------|
+| **Remote (SSE → MCP)** | Live **pulse** (extract → retrieve → …) over `GET /ami/dashboard/stream` on the MCP server. |
+| **Local (in-process)** | Runs `build_workflow()` in Streamlit; pulse after the run completes. |
+
+**UI (portfolio-friendly):** Executive summary with **hoverable `[1]`, `[2]`** citations; **Sources & Evidence** grouped as **Semantic News (Vector)** vs **Structural facts (Graph)** (graph rows shown as plain English + *Verified via Knowledge Graph*). Engineers can open **Technical Trace (JSON)** (collapsed by default).
+
+**HITL:** If `AMI_HITL_DIVERSITY=1`, the app may stop on **Diversity intervention**; pick **MMR λ** and **Resume with λ**. The sidebar **Diversity score** is `1 − λ` (how much retrieval biased toward diversity), not an automatic quality grade.
 
 ---
 

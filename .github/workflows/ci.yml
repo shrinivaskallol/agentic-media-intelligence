@@ -1,4 +1,4 @@
-# CI: Run tests on push and PR. Excludes integration tests (require Docker + API keys).
+# CI: lint + unit tests on push/PR. Integration tests are skipped (Docker + API keys).
 name: CI
 
 on:
@@ -8,11 +8,8 @@ on:
     branches: [main, master]
 
 jobs:
-  test:
+  lint-and-test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: agentic-media-intelligence
 
     strategy:
       fail-fast: false
@@ -27,17 +24,17 @@ jobs:
         with:
           version: "latest"
 
-      - name: Set up Python
+      - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: uv sync
 
-      - name: Lint with Ruff (PEP 8)
+      - name: Ruff check
         run: uv run ruff check app/ prompts/ tests/ scripts/
 
-      - name: Format check (PEP 8)
+      - name: Ruff format (check only)
         run: uv run ruff format --check app/ prompts/ tests/ scripts/
 
-      - name: Run tests
-        run: uv run pytest tests/test_ragas_routing.py tests/test_ragas_evaluator.py -v
+      - name: Pytest (excluding integration)
+        run: uv run pytest tests/ -v -m "not integration"
