@@ -50,6 +50,7 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "torch" },
     { name = "transformers" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -97,6 +98,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = "==2.7.0" },
     { name = "torch", specifier = "==2.2.2" },
     { name = "transformers", specifier = "<4.41" },
+    { name = "uvicorn", specifier = ">=0.30.0" },
 ]
 provides-extras = ["dev"]
 

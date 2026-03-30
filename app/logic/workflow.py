@@ -17,6 +17,7 @@ def make_initial_state(query: str) -> dict:
         "intent": "",
         "context": [],
         "response": "",
+        "mmr_lambda": 1.0,
     }
 
 

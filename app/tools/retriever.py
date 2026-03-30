@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
 import psycopg2
 from neo4j.exceptions import DriverError, ServiceUnavailable
 
@@ -247,6 +248,57 @@ def get_graph_context(entities: list[str], limit: int = 15) -> list[str]:
     return _get_graph_context(entities, limit)
 
 
+def _vec_to_numpy(v) -> np.ndarray:
+    """Parse pgvector / list / string repr into a 1-D float array."""
+    if v is None:
+        raise ValueError("null embedding")
+    if isinstance(v, np.ndarray):
+        return np.asarray(v, dtype=np.float64).ravel()
+    if isinstance(v, (list, tuple, memoryview)):
+        return np.asarray(v, dtype=np.float64).ravel()
+    s = str(v).strip()
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1]
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    return np.array([float(x) for x in parts], dtype=np.float64)
+
+
+def _mmr_order(
+    query_vec: np.ndarray,
+    doc_embs: np.ndarray,
+    k: int,
+    lambda_mult: float,
+) -> list[int]:
+    """Maximal marginal relevance: return indices into doc_embs (rows) in selection order."""
+    q = np.asarray(query_vec, dtype=np.float64).ravel()
+    q = q / (np.linalg.norm(q) + 1e-9)
+    d = np.asarray(doc_embs, dtype=np.float64)
+    if d.ndim == 1:
+        d = d.reshape(1, -1)
+    norms = np.linalg.norm(d, axis=1, keepdims=True) + 1e-9
+    d = d / norms
+    n = d.shape[0]
+    k = min(k, n)
+    rel = d @ q
+    selected: list[int] = []
+    candidates = set(range(n))
+    for _ in range(k):
+        best_i = -1
+        best_score = -np.inf
+        for i in candidates:
+            if not selected:
+                score = lambda_mult * rel[i]
+            else:
+                sim_to_sel = float(np.max(d[i] @ d[selected].T))
+                score = lambda_mult * rel[i] - (1.0 - lambda_mult) * sim_to_sel
+            if score > best_score:
+                best_score = score
+                best_i = i
+        selected.append(best_i)
+        candidates.remove(best_i)
+    return selected
+
+
 def _detect_article_chunks_schema(cur) -> str:
     """Return 'content' (01) or 'entity' (02) based on actual table columns."""
     cur.execute(
@@ -267,69 +319,159 @@ def get_vector_context(
     query_text: str,
     query_vector: list[float] | None = None,
     limit: int = 5,
+    mmr_lambda: float = 1.0,
 ) -> tuple[list[str], list[str], list[dict]]:
     """
     Finds semantically relevant text chunks from Postgres.
+    When mmr_lambda < 1.0, applies MMR on top of vector similarity (fetch_k > limit).
+
     Returns (context_bits, chunk_ids, metadata) for structured context with entity types.
     metadata: list of {"entity": str, "entity_type": str} for [ENTITY_TYPE] entity: content format.
     """
     from app.tools.db_utils import get_pg_conn
 
+    embedder = _get_embedder()
     if query_vector is None:
-        embedder = _get_embedder()
-        query_vector = embedder.encode(query_text, convert_to_numpy=True).tolist()
+        q_arr = embedder.encode(query_text, convert_to_numpy=True)
+    else:
+        q_arr = np.asarray(query_vector, dtype=np.float64).ravel()
 
-    vec_str = "[" + ",".join(str(float(x)) for x in query_vector) + "]"
+    vec_str = "[" + ",".join(str(float(x)) for x in q_arr) + "]"
     context_bits: list[str] = []
     chunk_ids: list[str] = []
     metadata: list[dict] = []
+
+    use_mmr = mmr_lambda < 1.0 - 1e-9
+    fetch_k = max(limit * 4, limit + 1) if use_mmr else limit
 
     try:
         conn = get_pg_conn()
         with conn.cursor() as cur:
             schema = _detect_article_chunks_schema(cur)
             if schema == "entity":
-                cur.execute(
+                sql = (
                     """
+                    SELECT entity, entity_type, confidence, embedding
+                    FROM article_chunks
+                    WHERE embedding IS NOT NULL
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """
+                    if use_mmr
+                    else """
                     SELECT entity, entity_type, confidence
                     FROM article_chunks
                     WHERE embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
-                    """,
-                    (vec_str, limit),
+                    """
                 )
+                cur.execute(sql, (vec_str, fetch_k))
                 rows = cur.fetchall()
-                for row in rows:
-                    entity, entity_type, confidence = row[0], row[1], row[2]
-                    etype = str(entity_type).upper() if entity_type else "UNKNOWN"
-                    content = f"Entity: {entity} ({entity_type}) with confidence {confidence}"
-                    context_bits.append(content)
-                    chunk_ids.append(str(entity))
-                    metadata.append(
-                        {"entity": str(entity) if entity else None, "entity_type": etype}
-                    )
+                if not rows:
+                    pass
+                elif use_mmr:
+                    embs: list[np.ndarray] = []
+                    valid_rows: list[tuple] = []
+                    for row in rows:
+                        entity, entity_type, confidence = row[0], row[1], row[2]
+                        emb_raw = row[3] if len(row) > 3 else None
+                        try:
+                            evec = _vec_to_numpy(emb_raw)
+                        except (ValueError, TypeError, IndexError):
+                            text = f"{entity} {entity_type}"
+                            evec = np.asarray(
+                                embedder.encode(str(text), convert_to_numpy=True),
+                                dtype=np.float64,
+                            ).ravel()
+                        embs.append(evec)
+                        valid_rows.append((entity, entity_type, confidence))
+                    if embs:
+                        doc_mat = np.stack(embs, axis=0)
+                        order = _mmr_order(q_arr, doc_mat, limit, mmr_lambda)
+                        for _, idx in enumerate(order, 1):
+                            entity, entity_type, confidence = valid_rows[idx]
+                            etype = str(entity_type).upper() if entity_type else "UNKNOWN"
+                            content = f"Entity: {entity} ({entity_type}) with confidence {confidence}"
+                            context_bits.append(content)
+                            chunk_ids.append(str(entity))
+                            metadata.append(
+                                {"entity": str(entity) if entity else None, "entity_type": etype}
+                            )
+                else:
+                    for row in rows:
+                        entity, entity_type, confidence = row[0], row[1], row[2]
+                        etype = str(entity_type).upper() if entity_type else "UNKNOWN"
+                        content = f"Entity: {entity} ({entity_type}) with confidence {confidence}"
+                        context_bits.append(content)
+                        chunk_ids.append(str(entity))
+                        metadata.append(
+                            {"entity": str(entity) if entity else None, "entity_type": etype}
+                        )
             else:
                 # 01 schema: chunk_hash, content, article_id
-                cur.execute(
+                sql = (
                     """
+                    SELECT chunk_hash, content, article_id, embedding
+                    FROM article_chunks
+                    WHERE embedding IS NOT NULL
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s
+                    """
+                    if use_mmr
+                    else """
                     SELECT chunk_hash, content, article_id
                     FROM article_chunks
                     WHERE embedding IS NOT NULL
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
-                    """,
-                    (vec_str, limit),
+                    """
                 )
+                cur.execute(sql, (vec_str, fetch_k))
                 rows = cur.fetchall()
-                for i, row in enumerate(rows, 1):
-                    chunk_hash, content, _ = row[0], row[1], row[2]
-                    chunk_ids.append(str(chunk_hash))
-                    context_bits.append(f"[{i}] {content or ''}")
-                    metadata.append({"entity": None, "entity_type": "TEXT"})
+                if not rows:
+                    pass
+                elif use_mmr:
+                    embs = []
+                    valid_rows = []
+                    for row in rows:
+                        chunk_hash, content, _aid = row[0], row[1], row[2]
+                        emb_raw = row[3] if len(row) > 3 else None
+                        try:
+                            evec = _vec_to_numpy(emb_raw)
+                        except (ValueError, TypeError, IndexError):
+                            evec = np.asarray(
+                                embedder.encode(content or "", convert_to_numpy=True),
+                                dtype=np.float64,
+                            ).ravel()
+                        embs.append(evec)
+                        valid_rows.append((chunk_hash, content))
+                    if embs:
+                        doc_mat = np.stack(embs, axis=0)
+                        order = _mmr_order(q_arr, doc_mat, limit, mmr_lambda)
+                        for j, idx in enumerate(order, 1):
+                            chunk_hash, content = valid_rows[idx]
+                            chunk_ids.append(str(chunk_hash))
+                            context_bits.append(f"[{j}] {content or ''}")
+                            metadata.append({"entity": None, "entity_type": "TEXT"})
+                else:
+                    for i, row in enumerate(rows, 1):
+                        chunk_hash, content, _ = row[0], row[1], row[2]
+                        chunk_ids.append(str(chunk_hash))
+                        context_bits.append(f"[{i}] {content or ''}")
+                        metadata.append({"entity": None, "entity_type": "TEXT"})
         conn.close()
     except (psycopg2.OperationalError, psycopg2.Error, OSError) as e:
         logger.warning("get_vector_context failed: %s", e)
+
+    if use_mmr and context_bits:
+        logger.info(
+            "MMR: lambda=%.3f fetch_k=%d -> %d chunks (limit=%d)",
+            mmr_lambda,
+            fetch_k,
+            len(context_bits),
+            limit,
+        )
 
     return context_bits, chunk_ids, metadata
 

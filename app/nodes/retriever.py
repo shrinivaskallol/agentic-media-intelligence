@@ -30,6 +30,16 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
     )
     intent = str(intent).strip().upper() or "RESEARCH"
 
+    if isinstance(state, dict):
+        raw_mmr = state.get("mmr_lambda", 1.0)
+    else:
+        raw_mmr = getattr(state, "mmr_lambda", 1.0)
+    try:
+        mmr_lambda = float(raw_mmr)
+    except (TypeError, ValueError):
+        mmr_lambda = 1.0
+    mmr_lambda = max(0.0, min(1.0, mmr_lambda))
+
     # Context window caps: Top 5 graph facts, Top 3 vector chunks (stay under Groq 6k TPM)
     if intent == "COMPETITION":
         graph_limit = 5
@@ -43,7 +53,7 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
         return get_graph_context(entities, limit=graph_limit)
 
     def _fetch_vector():
-        return get_vector_context(query, limit=vector_limit)
+        return get_vector_context(query, limit=vector_limit, mmr_lambda=mmr_lambda)
 
     # Run both retrievals in parallel
     graph_bits: list[str] = []
@@ -92,7 +102,8 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
     ]
 
     logger.debug(
-        "RETRIEVED: vector_chunk_ids=%s, graph_facts=%d",
+        "RETRIEVED: mmr_lambda=%.3f vector_chunk_ids=%s, graph_facts=%d",
+        mmr_lambda,
         chunk_ids,
         len(graph_bits),
     )
@@ -108,4 +119,5 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
         "context": combined_context,
         "retrieved_ids": chunk_ids,
         "retrieved_metadata": retrieved_meta,
+        "pending_mmr_refetch": False,
     }
