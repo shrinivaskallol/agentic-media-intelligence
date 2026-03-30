@@ -2,7 +2,7 @@
 
 Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
 
-**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
+**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [RAGAS](#reliability-scorecard-ragas) · [Stack](#tech-stack) · [Getting started](#getting-started) · [MCP & HITL](#mcp-and-hitl) · [Streamlit](#streamlit-dashboard-optional) · [Layout](#project-structure) · [Ports](#services-after-docker-compose-up--d)
 
 ---
 
@@ -233,14 +233,21 @@ Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
 ### 8. Streamlit dashboard (optional)
 
 ```bash
-# Terminal 1: MCP + dashboard routes on :8000
+# Terminal 1 — MCP must be up for Remote mode (SSE routes on MCP port, default :8000)
 uv run python src/mcp_server.py
 
-# Terminal 2:
+# Terminal 2
 uv run streamlit run app/ui/dashboard.py
 ```
 
-Choose **Remote (SSE → MCP)** for live **node pulse** over HTTP, or **Local (in-process)** to call `build_workflow()` directly (trace appears when the run finishes). With HITL enabled, an interrupt surfaces the **Diversity intervention** card; use **Resume with λ** to call the resume SSE (or local) path.
+| Mode | What it does |
+|------|----------------|
+| **Remote (SSE → MCP)** | Live **pulse** (extract → retrieve → …) over `GET /ami/dashboard/stream` on the MCP server. |
+| **Local (in-process)** | Runs `build_workflow()` in Streamlit; pulse after the run completes. |
+
+**UI (portfolio-friendly):** Executive summary with **hoverable `[1]`, `[2]`** citations; **Sources & Evidence** grouped as **Semantic News (Vector)** vs **Structural facts (Graph)** (graph rows shown as plain English + *Verified via Knowledge Graph*). Engineers can open **Technical Trace (JSON)** (collapsed by default).
+
+**HITL:** If `AMI_HITL_DIVERSITY=1`, the app may stop on **Diversity intervention**; pick **MMR λ** and **Resume with λ**. The sidebar **Diversity score** is `1 − λ` (how much retrieval biased toward diversity), not an automatic quality grade.
 
 ---
 
