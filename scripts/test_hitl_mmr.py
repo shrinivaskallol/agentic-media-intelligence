@@ -7,8 +7,8 @@ Requires: .env with DB/LLM as usual. Sets AMI_HITL_* for this process only.
 Usage (from repo root):
   AMI_HITL_DIVERSITY=1 AMI_HITL_MIN_CONTEXT=2 uv run python scripts/test_hitl_mmr.py
 
-AMI_HITL_MIN_CONTEXT must be <= len(state.context) after retrieve (currently 2 blocks:
-graph section + vector section). Default 6 never fires; use 1 or 2.
+AMI_HITL_MIN_CONTEXT compares to retrieval units (vectors + graph facts + blocks).
+This script defaults MIN_CONTEXT to 2 so the smoke test still interrupts if your DB is sparse.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ async def main() -> None:
     intr = d1.get("__interrupt__")
     if not intr:
         print("No interrupt. context items:", len(d1.get("context") or []))
-        print("Set AMI_HITL_MIN_CONTEXT to 1 or 2 (see script docstring).")
+        print("Lower AMI_HITL_MIN_CONTEXT (e.g. 1) or seed DB so retrieval_units meets threshold.")
         sys.exit(1)
 
     print("Interrupt payload present:", bool(intr))

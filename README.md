@@ -205,11 +205,11 @@ Opens a UI (often at http://localhost:6274). Choose **SSE**, then **Connect**. T
    | Variable | Purpose |
    |----------|---------|
    | `AMI_HITL_DIVERSITY` | `1`, `true`, or `yes` to enable; anything else disables HITL |
-   | `AMI_HITL_MIN_CONTEXT` | Interrupt when `len(state.context) >=` this value (integer ≥ 1) |
+   | `AMI_HITL_MIN_CONTEXT` | Interrupt when **retrieval units** ≥ this value (integer ≥ 1): max of context blocks, vector chunk IDs, and `GRAPH FACT:` lines (default **3**) |
 
 3. **Restart** `mcp_server.py` after changing `.env`. The server loads `.env` with override so these values take effect.
 
-**Threshold note:** After `retrieve`, `context` is typically **two** list items (graph block + vector block). The default **`AMI_HITL_MIN_CONTEXT=6`** therefore **never** fires. For local testing, use `AMI_HITL_MIN_CONTEXT=1` or `2`; raise it in production when you want interrupts only for “heavy” context.
+**Threshold note:** Older builds compared only `len(state.context)` (almost always 2), which made high defaults useless. Current behavior uses **retrieval units** (see table above); default **3** typically fires on a normal Nvidia/TSMC/Blackwell run with graph + vectors.
 
 **Tool flow**
 
@@ -223,7 +223,24 @@ Opens a UI (often at http://localhost:6274). Choose **SSE**, then **Connect**. T
 AMI_HITL_DIVERSITY=1 AMI_HITL_MIN_CONTEXT=2 uv run python scripts/test_hitl_mmr.py
 ```
 
+**Dashboard SSE (same process as MCP):** optional HTTP routes for Streamlit or other UIs:
+
+- `GET /ami/dashboard/stream?query=...&thread_id=...` — Server-Sent Events of node/tool markers + final state (or interrupt).
+- `GET /ami/dashboard/resume/stream?thread_id=...&lambda_value=0.5` — continue after HITL.
+
 Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
+
+### 8. Streamlit dashboard (optional)
+
+```bash
+# Terminal 1: MCP + dashboard routes on :8000
+uv run python src/mcp_server.py
+
+# Terminal 2:
+uv run streamlit run app/ui/dashboard.py
+```
+
+Choose **Remote (SSE → MCP)** for live **node pulse** over HTTP, or **Local (in-process)** to call `build_workflow()` directly (trace appears when the run finishes). With HITL enabled, an interrupt surfaces the **Diversity intervention** card; use **Resume with λ** to call the resume SSE (or local) path.
 
 ---
 
@@ -242,7 +259,8 @@ Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
 │   ├── state/            # GraphState schema (incl. mmr_lambda, HITL flags)
 │   ├── graph/            # LangGraph workflow definition
 │   ├── nodes/            # Extractor, Retriever, diversity_gate, Grader, Synthesis, …
-│   └── tools/            # Vector (MMR-capable) + Graph retrieval
+│   ├── tools/            # Vector (MMR-capable) + Graph retrieval
+│   └── ui/               # Streamlit dashboard + SSE event helpers for LangGraph
 ├── tests/                # Pytest tests (unit + integration)
 │   ├── conftest.py       # Shared fixtures
 │   ├── test_*.py

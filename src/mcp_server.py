@@ -13,6 +13,10 @@ FastMCP: ``transport="sse"`` serves ``/sse``; ``transport="http"`` serves ``/mcp
 
 HITL (MMR λ): set ``AMI_HITL_DIVERSITY=1`` in ``.env``. When enough context chunks are retrieved,
 the graph interrupts; call ``resume_research`` with the same ``thread_id`` and ``lambda_value``.
+
+Dashboard SSE (Streamlit): ``GET /ami/dashboard/stream?query=...&thread_id=...`` and
+``GET /ami/dashboard/resume/stream?thread_id=...&lambda_value=...`` — custom HTTP routes on the
+same port as MCP SSE (e.g. :8000).
 """
 
 import json
@@ -37,9 +41,12 @@ install_suppress_async_noise()
 
 from fastmcp import FastMCP
 from langgraph.types import Command
+from starlette.requests import Request
+from starlette.responses import JSONResponse, StreamingResponse
 
 from app.graph.entity_workflow import build_workflow
 from app.logic.workflow import make_initial_state
+from app.ui.workflow_stream import iter_workflow_dashboard_events, sse_encode
 
 mcp = FastMCP("Auto-Intelligence-Service")
 
@@ -74,9 +81,9 @@ def _log_mcp_startup_banner() -> None:
     hitl = _hitl_enabled()
     raw = os.environ.get("AMI_HITL_DIVERSITY", "")
     try:
-        min_ctx = int(os.environ.get("AMI_HITL_MIN_CONTEXT", "6"))
+        min_ctx = int(os.environ.get("AMI_HITL_MIN_CONTEXT", "3"))
     except ValueError:
-        min_ctx = 6
+        min_ctx = 3
     mode = (
         "HITL ON — research_company uses ainvoke until interrupt; resume_research streams (astream_events)"
         if hitl
@@ -156,6 +163,53 @@ def _interrupt_response(rd: dict[str, Any], thread_id: str) -> str:
         },
         indent=2,
     )
+
+
+@mcp.custom_route("/ami/dashboard/stream", methods=["GET"])
+async def ami_dashboard_workflow_stream(request: Request) -> StreamingResponse | JSONResponse:
+    """SSE of LangGraph node/tool events + final state (for Streamlit or other clients)."""
+    query = (request.query_params.get("query") or "").strip()
+    thread_id = (request.query_params.get("thread_id") or "dashboard").strip()
+    if not query:
+        return JSONResponse({"error": "query parameter required"}, status_code=400)
+
+    app = get_mcp_workflow()
+    inputs = make_initial_state(query)
+    config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+
+    async def gen():
+        try:
+            async for ev in iter_workflow_dashboard_events(app, inputs, config):
+                yield sse_encode(ev)
+        except Exception as e:
+            yield sse_encode({"type": "error", "message": str(e)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@mcp.custom_route("/ami/dashboard/resume/stream", methods=["GET"])
+async def ami_dashboard_resume_stream(request: Request) -> StreamingResponse | JSONResponse:
+    """SSE after HITL: continue with MMR λ (same thread_id as initial stream)."""
+    thread_id = (request.query_params.get("thread_id") or "").strip()
+    if not thread_id:
+        return JSONResponse({"error": "thread_id parameter required"}, status_code=400)
+    try:
+        lam = float(request.query_params.get("lambda_value", "0.5"))
+    except ValueError:
+        return JSONResponse({"error": "invalid lambda_value"}, status_code=400)
+
+    app = get_mcp_workflow()
+
+    async def gen():
+        try:
+            async for ev in iter_workflow_dashboard_events(
+                app, Command(resume=lam), {"configurable": {"thread_id": thread_id}}
+            ):
+                yield sse_encode(ev)
+        except Exception as e:
+            yield sse_encode({"type": "error", "message": str(e)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @mcp.tool()
