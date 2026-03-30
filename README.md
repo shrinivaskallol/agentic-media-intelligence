@@ -49,8 +49,10 @@ AMI is a Corrective RAG (CRAG) system built on a cyclic state machine. It does n
 **Updating this figure:** The README always points at `docs/architecture_graph.png`. Running the exporter **overwrites that file**; you do **not** need to edit the README image path.
 
 ```bash
-uv run python scripts/export_graph.py   # writes docs/architecture_graph.png (requires Graphviz for PNG)
+uv run python scripts/export_graph.py
 ```
+
+Writes **`docs/architecture_graph.mmd`** (plain Mermaid — verify `diversity_gate` here or at [mermaid.live](https://mermaid.live)) and **`docs/architecture_graph.png`** (needs **Graphviz** installed for PNG). Commit **both** files if you want the repo and GitHub README image to stay current.
 
 ### Trace Example: The Multi-Hop Challenge
 
@@ -232,7 +234,8 @@ Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
 ├── compose.yaml          # Neo4j, Postgres, Redis
 ├── pyproject.toml        # Dependencies (uv)
 ├── docs/
-│   └── architecture_graph.png  # Generated; see scripts/export_graph.py
+│   ├── architecture_graph.mmd    # Generated Mermaid (source for the diagram)
+│   └── architecture_graph.png   # Generated PNG for README (same export script)
 ├── src/
 │   └── mcp_server.py     # MCP server (SSE on :8000 by default; --stdio for Cursor command)
 ├── app/
@@ -250,7 +253,7 @@ Dependencies: `fastmcp`, `uvicorn` (see `pyproject.toml`).
     ├── seed_synthetic_neo4j.py
     ├── run_workflow.py   # Run CRAG workflow demo
     ├── run_evaluation.py # Run golden-dataset evaluation
-    ├── export_graph.py   # Regenerate docs/architecture_graph.png from LangGraph
+    ├── export_graph.py   # Regenerate docs/architecture_graph.{mmd,png} from LangGraph
     └── test_hitl_mmr.py  # Optional local HITL + MMR smoke test
 ```
 
