@@ -1,9 +1,13 @@
-# Demo assets
+# Demo assets (portfolio)
 
-For the best first impression on GitHub, add your own screenshot:
+## README hero (checked in)
 
-1. Run Streamlit after a successful research query (numeric citations `[1]`, `[2]` visible).
-2. Save as **`streamlit-executive-summary.png`** in this directory (`docs/`).
-3. The README references this path at the top; replace the file anytime.
+**`streamlit-executive-summary.png`** — Dashboard still with numeric citations `[1]`, `[2]`, … Commit this file under `docs/`.
 
-Public **LangSmith** traces (no local setup) are linked from the main README under **Evidence of Resilience**.
+## Optional: animated demo
+
+**`streamlit-hitl-demo.gif`** (~30s loop) — HITL **interrupt** → **MMR λ** → **Resume** → summary updates. Export with macOS screen recording, [Peek](https://github.com/phw/peek), etc. If you add it, you can place a second `![…](docs/streamlit-hitl-demo.gif)` line under the PNG in `README.md`.
+
+## No-install validation
+
+Public **LangSmith** links in the main README — open each in **incognito**; a sign-in wall means the trace is not public enough for “instant validation.”
