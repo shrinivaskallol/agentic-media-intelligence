@@ -1,10 +1,6 @@
 # Agentic Media Intelligence
 
-**GraphRAG + corrective RAG (CRAG)** on LangGraph: graded retrieval, rewrite loops, RAGAS evaluation, and optional **human-in-the-loop** MMR tuning — portfolio work by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/).
-
-![Streamlit — executive summary with numeric citations [1], [2], …](docs/streamlit-executive-summary.png)
-
-*Hero image: **`docs/streamlit-executive-summary.png`**. Optional motion demo: add a GIF alongside per [docs/DEMO.md](docs/DEMO.md).*
+Stateful multi-agent system for financial news analysis using LangGraph, GraphRAG, and LLM evaluation. A live portfolio project by [Shri Kallol](https://www.linkedin.com/in/shrinivas-kallol/) demonstrating the transition from "Retrieval" to "Reasoning" in the 2026 AI Agent landscape.
 
 [![CI](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml)
 Licensed under the [MIT License](LICENSE).
