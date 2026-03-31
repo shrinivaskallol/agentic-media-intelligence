@@ -18,6 +18,9 @@ def make_initial_state(query: str) -> dict:
         "context": [],
         "response": "",
         "mmr_lambda": 1.0,
+        "revision_count": 0,
+        "exit_reason": "",
+        "partial_answer": False,
     }
 
 

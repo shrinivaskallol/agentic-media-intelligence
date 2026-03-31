@@ -16,6 +16,7 @@ from app.nodes.evaluator import evaluation_node
 from app.nodes.extraction import entity_extractor
 from app.nodes.fallback import fallback_node
 from app.nodes.grader import grader_node
+from app.nodes.refusal import refusal_node
 from app.nodes.retriever import hybrid_retrieval_node
 from app.nodes.rewrite import rewrite_node
 from app.nodes.synthesis import synthesis_node
@@ -109,32 +110,37 @@ def _route_after_diversity(state: GraphState | dict) -> str:
 
 def _grader_route(state: GraphState | dict) -> str:
     """
-    Agentic loop: If context sufficient or retrieval_revision_count >= 2, proceed to synthesis.
-    Otherwise route to rewrite for query refinement and re-retrieval.
+    Agentic loop: rewrite until context sufficient or partial_answer after max retries.
     """
+    partial = getattr(state, "partial_answer", None)
+    if partial is None and isinstance(state, dict):
+        partial = state.get("partial_answer", False)
+    if bool(partial):
+        logger.info("GRADER: Partial answer flag; proceeding to synthesis")
+        return "generate_response"
+
     sufficient = getattr(state, "context_sufficient", None)
     if sufficient is None and isinstance(state, dict):
         sufficient = state.get("context_sufficient", True)
     sufficient = bool(sufficient) if sufficient is not None else True
-    rev = getattr(state, "retrieval_revision_count", None)
-    if rev is None and isinstance(state, dict):
-        rev = state.get("retrieval_revision_count", 0)
-    rev = int(rev) if rev is not None else 0
 
     if sufficient:
         logger.info("GRADER: Context sufficient; proceeding to synthesis")
         return "generate_response"
-    if rev >= 2:
-        logger.info("GRADER: Max retrieval revisions (2) reached; proceeding to synthesis")
-        return "generate_response"
+
     logger.info("GRADER: Context insufficient; routing to rewrite")
     return "rewrite_query"
 
 
 def router_logic(state: GraphState | dict) -> str:
-    """
-    The Decision Point: Short-circuits the graph if the query is irrelevant.
-    """
+    """After extractor: out-of-scope → refusal; IRRELEVANT → END; else retrieve."""
+    exit_reason = getattr(state, "exit_reason", None) or (
+        state.get("exit_reason", "") if isinstance(state, dict) else ""
+    )
+    if exit_reason == "out_of_scope":
+        logger.info("ROUTING: Out of scope → guided refusal")
+        return "refusal"
+
     intent = getattr(state, "intent", None) or (
         state.get("intent", "") if isinstance(state, dict) else ""
     )
@@ -161,6 +167,7 @@ def build_workflow(checkpointer=None):
     workflow = StateGraph(GraphState)
 
     workflow.add_node("extractor", timed_node(entity_extractor, "extractor"))
+    workflow.add_node("refusal", timed_node(refusal_node, "refusal"))
     workflow.add_node("retrieve", timed_node(hybrid_retrieval_node, "retrieve"))
     workflow.add_node("diversity_gate", timed_node(diversity_gate_node, "diversity_gate"))
     workflow.add_node("grader", timed_node(grader_node, "grader"))
@@ -178,8 +185,10 @@ def build_workflow(checkpointer=None):
         {
             "continue": "retrieve",
             "end": END,
+            "refusal": "refusal",
         },
     )
+    workflow.add_edge("refusal", END)
 
     workflow.add_edge("retrieve", "diversity_gate")
     workflow.add_conditional_edges(

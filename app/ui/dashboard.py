@@ -59,21 +59,6 @@ async def _collect_events(app: Any, inputs: Any, config: dict) -> list[dict[str,
     return out
 
 
-def run_local_collect(query: str, thread_id: str) -> list[dict[str, Any]]:
-    app = _build_ui_workflow()
-    inputs = make_initial_state(query)
-    config = {"configurable": {"thread_id": thread_id}}
-    try:
-        return asyncio.run(_collect_events(app, inputs, config))
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(_collect_events(app, inputs, config))
-        finally:
-            loop.close()
-
-
 def run_local_resume(thread_id: str, lambda_value: float) -> list[dict[str, Any]]:
     app = _build_ui_workflow()
     config = {"configurable": {"thread_id": thread_id}}
@@ -112,6 +97,72 @@ def _render_pulse(ev: dict[str, Any], container) -> None:
         container.markdown(f"▸ **`{ev.get('node')}`**")
     elif t == "tool_start":
         container.caption(f"tool: `{ev.get('name')}`")
+    elif t == "status":
+        sub = ev.get("status")
+        if sub == "refusal":
+            container.warning("**Out of scope** — guided refusal (domain pivot).")
+        elif sub == "partial_warning":
+            container.info(ev.get("message") or "Sparse evidence — partial analysis.")
+
+
+def _apply_done_event(ev: dict[str, Any]) -> None:
+    """Mirror session_state updates from a terminal ``done`` event."""
+    status = ev.get("status")
+    st.session_state["last_done_status"] = status
+    if status == "interrupted":
+        st.session_state["awaiting_resume"] = True
+        st.session_state["final_state"] = ev.get("state") or {}
+    elif status == "partial":
+        st.session_state["awaiting_resume"] = False
+        st.session_state["final_state"] = ev.get("state") or {}
+    elif status == "completed":
+        st.session_state["awaiting_resume"] = False
+        st.session_state.pop("interrupt_snapshot", None)
+        st.session_state["final_state"] = ev.get("state") or {}
+    elif status == "refusal":
+        st.session_state["awaiting_resume"] = False
+        st.session_state["final_state"] = ev.get("state") or {}
+    elif status == "completed_partial":
+        st.session_state["awaiting_resume"] = False
+        st.session_state.pop("interrupt_snapshot", None)
+        st.session_state["final_state"] = ev.get("state") or {}
+
+
+async def _collect_events_with_callback(
+    app: Any,
+    inputs: Any,
+    config: dict,
+    pulse: Any,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    async for ev in iter_workflow_dashboard_events(app, inputs, config):
+        out.append(ev)
+        _render_pulse(ev, pulse)
+        if ev.get("type") == "interrupt":
+            st.session_state["interrupt_snapshot"] = ev
+            st.session_state["awaiting_resume"] = True
+        if ev.get("type") == "done":
+            _apply_done_event(ev)
+    return out
+
+
+def _run_local_collect_streaming(query: str, thread_id: str, pulse: Any) -> list[dict[str, Any]]:
+    app = _build_ui_workflow()
+    inputs = make_initial_state(query)
+    config = {"configurable": {"thread_id": thread_id}}
+
+    async def _run() -> list[dict[str, Any]]:
+        return await _collect_events_with_callback(app, inputs, config, pulse)
+
+    try:
+        return asyncio.run(_run())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(_run())
+        finally:
+            loop.close()
 
 
 def main() -> None:
@@ -173,17 +224,7 @@ def main() -> None:
                             st.session_state["interrupt_snapshot"] = ev
                             st.session_state["awaiting_resume"] = True
                         if ev.get("type") == "done":
-                            st.session_state["last_done_status"] = ev.get("status")
-                            if ev.get("status") == "interrupted":
-                                st.session_state["awaiting_resume"] = True
-                                st.session_state["final_state"] = ev.get("state") or {}
-                            elif ev.get("status") == "partial":
-                                st.session_state["awaiting_resume"] = False
-                                st.session_state["final_state"] = ev.get("state") or {}
-                            elif ev.get("status") == "completed":
-                                st.session_state["awaiting_resume"] = False
-                                st.session_state.pop("interrupt_snapshot", None)
-                                st.session_state["final_state"] = ev.get("state") or {}
+                            _apply_done_event(ev)
             except httpx.ConnectError:
                 error = f"Cannot connect to {mcp_base}. Start MCP: `uv run python src/mcp_server.py`"
             except httpx.HTTPStatusError as e:
@@ -194,27 +235,9 @@ def main() -> None:
             if error:
                 st.error(error)
         else:
-            with st.spinner("Running workflow in-process (trace appears when finished)…"):
-                events = run_local_collect(query.strip(), tid)
+            with st.status("Execution trace (local)", expanded=True) as pulse:
+                events = _run_local_collect_streaming(query.strip(), tid, pulse)
             st.session_state["last_events"] = events
-            with st.status("Execution trace", expanded=True) as pulse:
-                for ev in events:
-                    _render_pulse(ev, pulse)
-                    if ev.get("type") == "interrupt":
-                        st.session_state["interrupt_snapshot"] = ev
-                        st.session_state["awaiting_resume"] = True
-                    if ev.get("type") == "done":
-                        st.session_state["last_done_status"] = ev.get("status")
-                        if ev.get("status") == "interrupted":
-                            st.session_state["awaiting_resume"] = True
-                            st.session_state["final_state"] = ev.get("state") or {}
-                        elif ev.get("status") == "partial":
-                            st.session_state["awaiting_resume"] = False
-                            st.session_state["final_state"] = ev.get("state") or {}
-                        elif ev.get("status") == "completed":
-                            st.session_state["awaiting_resume"] = False
-                            st.session_state.pop("interrupt_snapshot", None)
-                            st.session_state["final_state"] = ev.get("state") or {}
 
     # After Start research updates session_state, so HITL controls render in the same run.
     if st.session_state.get("interrupt_snapshot") or st.session_state.get("awaiting_resume"):
@@ -238,22 +261,17 @@ def main() -> None:
                         ):
                             events_resume.append(ev)
                             _render_pulse(ev, pulse_r)
+                            if ev.get("type") == "interrupt":
+                                st.session_state["interrupt_snapshot"] = ev
+                                st.session_state["awaiting_resume"] = True
                             if ev.get("type") == "done":
-                                st.session_state["awaiting_resume"] = False
-                                st.session_state.pop("interrupt_snapshot", None)
+                                _apply_done_event(ev)
                 except Exception as e:
                     err = e
                 if err:
                     st.error(str(err))
                 elif events_resume:
                     st.session_state["last_events"] = events_resume
-                    final = events_resume[-1]
-                    if final.get("type") == "done" and final.get("status") == "completed":
-                        st.session_state["final_state"] = final.get("state") or {}
-                        st.session_state["last_done_status"] = "completed"
-                    elif final.get("type") == "done":
-                        st.session_state["last_done_status"] = final.get("status")
-                        st.session_state["final_state"] = final.get("state") or {}
                     st.rerun()
             else:
                 with st.spinner("Resuming in-process…"):
@@ -286,10 +304,19 @@ def main() -> None:
             )
         with col_main:
             if summary_raw:
-                st.markdown(
-                    inject_citation_tooltips_html(summary_raw, cite_map),
-                    unsafe_allow_html=True,
-                )
+                body = inject_citation_tooltips_html(summary_raw, cite_map)
+                if done_status == "refusal":
+                    st.markdown(
+                        f'<div style="border: 2px solid #e67e22; padding: 12px; border-radius: 8px;">{body}</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    if done_status == "completed_partial":
+                        st.warning(
+                            "Notice: Data for this query is sparse; the report below is a **partial** "
+                            "analysis from high-confidence fragments."
+                        )
+                    st.markdown(body, unsafe_allow_html=True)
             elif done_status == "interrupted":
                 st.info(
                     "Graph paused for **HITL / MMR λ**. Use **Diversity intervention** (section above), "
@@ -300,6 +327,8 @@ def main() -> None:
                     "Run ended **before synthesis** produced a report (stream or graph stopped early, "
                     "or an error occurred after retrieval). Check the **MCP server terminal** for tracebacks."
                 )
+            elif done_status == "refusal":
+                st.info("Out-of-scope query — no executive report was synthesized.")
             else:
                 st.warning("No report in final state yet (run may have failed or been cut off).")
 
