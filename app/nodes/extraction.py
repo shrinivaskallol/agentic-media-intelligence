@@ -53,6 +53,14 @@ class ExtractionSchema(BaseModel):
 
     entities: list[str] = Field(description="Companies or tech terms. Leave empty if IRRELEVANT.")
     intent: str = Field(description="Must be one of: RESEARCH, COMPETITION, or IRRELEVANT.")
+    is_in_scope: bool = Field(
+        default=True,
+        description=(
+            "False only if unrelated to semiconductor supply chains, finance, or market intelligence. "
+            "True for semiconductor/company/supply-chain questions even if the named company is unknown, "
+            "hypothetical, or non-existent (answer may be 'no data')."
+        ),
+    )
     log_message: str = Field(
         description="A brief status update for the user (e.g., 'Analyzing Nvidia supply chain...')."
     )
@@ -120,13 +128,19 @@ def entity_extractor(state: GraphState | dict) -> dict:
     if intent not in ("RESEARCH", "COMPETITION", "IRRELEVANT"):
         intent = "IRRELEVANT" if not entities else "RESEARCH"
 
-    logger.info("INTENT: %s | ENTITIES: %s", intent, entities)
+    logger.info("INTENT: %s | ENTITIES: %s | IN_SCOPE: %s", intent, entities, result.is_in_scope)
     logger.info("SYSTEM STATUS: %s", result.log_message)
 
     out: dict = {
         "entities": entities,
         "intent": intent,
     }
+
+    if not getattr(result, "is_in_scope", True):
+        out["exit_reason"] = "out_of_scope"
+        out["entities"] = []
+        out["intent"] = "RESEARCH"
+        return out
 
     # If irrelevant, set response so user gets a polite message when we short-circuit
     if intent == "IRRELEVANT":

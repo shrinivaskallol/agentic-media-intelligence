@@ -52,7 +52,7 @@ def grader_node(state: GraphState | dict) -> dict:
         logger.info("GRADER: No context; insufficient")
         return {
             "context_sufficient": False,
-            "retrieval_revision_count": 1 if retrieval_rev < 2 else 0,
+            "retrieval_revision_count": 1 if retrieval_rev < 3 else 0,
         }
 
     llm = get_critique_llm()
@@ -68,8 +68,16 @@ def grader_node(state: GraphState | dict) -> dict:
         retrieval_rev,
     )
 
+    if not sufficient and retrieval_rev >= 3:
+        logger.info("GRADER: max retrieval retries — partial answer path")
+        return {
+            "context_sufficient": True,
+            "partial_answer": True,
+            "exit_reason": "max_retries_exceeded",
+        }
+
     out = {"context_sufficient": sufficient}
-    if not sufficient and retrieval_rev < 2:
+    if not sufficient and retrieval_rev < 3:
         out["retrieval_revision_count"] = 1
 
     return out

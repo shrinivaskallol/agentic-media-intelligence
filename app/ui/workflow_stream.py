@@ -109,8 +109,35 @@ async def iter_workflow_dashboard_events(
 
         safe_state = json.loads(json.dumps(dict(merged_state), default=str))
         has_resp = bool(str(merged_state.get("response") or "").strip())
-        status = "completed" if has_resp else "partial"
-        yield {"type": "done", "status": status, "state": safe_state}
+        exit_reason = str(merged_state.get("exit_reason") or "").strip()
+
+        if exit_reason == "out_of_scope":
+            yield {
+                "type": "status",
+                "status": "refusal",
+                "exit_reason": exit_reason,
+            }
+        elif exit_reason == "max_retries_exceeded":
+            yield {
+                "type": "status",
+                "status": "partial_warning",
+                "exit_reason": exit_reason,
+                "message": (
+                    "Notice: Data for this specific query is sparse; providing a partial analysis "
+                    "based on high-confidence fragments."
+                ),
+            }
+
+        if exit_reason == "out_of_scope":
+            done_status = "refusal"
+        elif exit_reason == "max_retries_exceeded":
+            done_status = "completed_partial"
+        elif has_resp:
+            done_status = "completed"
+        else:
+            done_status = "partial"
+
+        yield {"type": "done", "status": done_status, "state": safe_state}
     except Exception as e:
         yield {"type": "error", "message": str(e)}
         raise

@@ -31,6 +31,12 @@ def synthesis_node(state: GraphState | dict) -> dict:
     critique_feedback = getattr(state, "critique", None) or (
         state.get("critique", "") if isinstance(state, dict) else ""
     )
+    partial_answer = getattr(state, "partial_answer", None) or (
+        state.get("partial_answer", False) if isinstance(state, dict) else False
+    )
+    exit_reason = getattr(state, "exit_reason", None) or (
+        state.get("exit_reason", "") if isinstance(state, dict) else ""
+    )
 
     revision_instruction = ""
     if critique_feedback and critique_feedback.strip().upper() != "PASS":
@@ -41,6 +47,16 @@ def synthesis_node(state: GraphState | dict) -> dict:
             "Please regenerate the report addressing these specific points."
         )
         logger.info("Regenerating with critique feedback")
+
+    partial_preamble = ""
+    if partial_answer or exit_reason == "max_retries_exceeded":
+        partial_preamble = (
+            "PARTIAL ANSWER MODE: Retrieval did not yield fully sufficient context after maximum "
+            "rewrite attempts. Produce the best possible structured report from the evidence below. "
+            "State clearly at the start that the analysis is partial and evidence is sparse. "
+            "Do not invent facts.\n\n"
+        )
+        logger.info("SYNTHESIZING PARTIAL REPORT (max_retries_exceeded)")
 
     logger.info("SYNTHESIZING %s REPORT", intent)
 
@@ -64,6 +80,8 @@ def synthesis_node(state: GraphState | dict) -> dict:
 
     # Numbered evidence (vectors first, then graph) — citations in the answer must use [1], [2], … only
     context_str = build_numbered_context_for_llm(state)
+    if partial_preamble:
+        context_str = partial_preamble + context_str
 
     prompt = ChatPromptTemplate.from_messages(
         [

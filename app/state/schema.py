@@ -107,6 +107,16 @@ class GraphState(BaseModel):
         description="Conversation history for coreference: [{query, response}, ...]. Used by extractor.",
     )
 
+    exit_reason: str = Field(
+        default="",
+        description="Terminal reason: out_of_scope, max_retries_exceeded, or empty when normal.",
+    )
+
+    partial_answer: bool = Field(
+        default=False,
+        description="True when synthesis should produce best-effort output after grader max retries.",
+    )
+
     class Config:
         """Allows arbitrary types if you decide to add DB drivers directly to state."""
 

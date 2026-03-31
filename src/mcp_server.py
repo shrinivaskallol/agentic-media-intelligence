@@ -46,6 +46,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from app.graph.entity_workflow import build_workflow
 from app.logic.workflow import make_initial_state
+from app.services.telemetry import log_workflow_outcome
 from app.ui.workflow_stream import iter_workflow_dashboard_events, sse_encode
 
 mcp = FastMCP("Auto-Intelligence-Service")
@@ -232,8 +233,10 @@ async def research_company(query: str, thread_id: str = "default") -> str:
         result = await app.ainvoke(inputs, config)
         rd = _normalize_state(result)
         if rd.get("__interrupt__"):
+            log_workflow_outcome(rd, hitl_interrupted=True)
             _mcp_progress("[MCP] Interrupted — waiting for resume_research(lambda_value=...)\n")
             return _interrupt_response(rd, thread_id)
+        log_workflow_outcome(rd, hitl_interrupted=False)
         response = (rd.get("response") or "").strip()
         _mcp_progress(f"[MCP] Done (response length={len(response)} chars)\n")
         return response
@@ -247,6 +250,7 @@ async def research_company(query: str, thread_id: str = "default") -> str:
         final_d = _event_output_to_dict(final) or {}
         merged_state.update(final_d)
         response = (merged_state.get("response") or "").strip()
+    log_workflow_outcome(merged_state, hitl_interrupted=False)
     _mcp_progress(f"[MCP] Done (response length={len(response)} chars)\n")
     return response
 
@@ -271,8 +275,10 @@ async def resume_research(thread_id: str, lambda_value: float) -> str:
     )
 
     if merged_state.get("__interrupt__"):
+        log_workflow_outcome(merged_state, hitl_interrupted=True)
         return _interrupt_response(merged_state, thread_id)
 
+    log_workflow_outcome(merged_state, hitl_interrupted=False)
     response = (merged_state.get("response") or "").strip()
     if not response:
         _mcp_progress(
