@@ -9,7 +9,7 @@
 [![CI](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivaskallol/agentic-media-intelligence/actions/workflows/ci.yml)
 Licensed under the [MIT License](LICENSE).
 
-**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Architecture](#system-architecture) · [Evidence](#evidence-of-resilience-traces) · [Quick start](#quick-start) · [Data & reproducibility](#data--reproducibility) · [Stack](#tech-stack) · [Deep dives](#deep-dives) · [Reference](#reference)
+**Contents:** [Problem](#the-problem) · [Solution](#the-solution-agentic-design-patterns) · [Stopping conditions](#stopping-conditions) · [Architecture](#system-architecture) · [Evidence](#evidence-of-resilience-traces) · [Quick start](#quick-start) · [Data & reproducibility](#data--reproducibility) · [Stack](#tech-stack) · [Deep dives](#deep-dives) · [Reference](#reference)
 
 ---
 
@@ -35,6 +35,21 @@ AMI is a **Corrective RAG** system: it does not only *search and tell*; it **gra
 **Answer quality** (synthesis → evaluator → critique) — **Self-reflection:** RAGAS-style metrics act as a judge; **Critique** forces regeneration when grounding fails.
 
 **Retrieval diversity (optional HITL)** (retrieve → diversity_gate → human sets **λ** → retrieve → grader) — After retrieval, pgvector results can be re-ranked with **Maximal Marginal Relevance**. With HITL on, the graph **interrupts** so an operator chooses **λ ∈ [0, 1]** (higher **λ** = more relevance-only; lower **λ** = more diversity). Requires a LangGraph **checkpointer** (in-memory in MCP when HITL is enabled).
+
+### Stopping conditions
+
+The graph **terminates** at `END` when a path below completes. **Interrupt** is a **pause** (checkpointed), not a completed answer.
+
+| Outcome | Trigger | Typical state |
+|--------|---------|----------------|
+| **Guided refusal** | Extractor: query **out of domain** (`is_in_scope: false`) | `exit_reason=out_of_scope` → refusal node → **END** (no retrieval) |
+| **Extractor short-circuit** | Intent **IRRELEVANT** (off-topic classification) | **END** after extractor (legacy path; optional canned `response`) |
+| **Partial synthesis** | Grader: context still insufficient after **3** retrieve→rewrite cycles | `exit_reason=max_retries_exceeded`, `partial_answer=true` → synthesis (best-effort) → evaluator → **END** |
+| **Happy path** | Sufficient context → synthesis → evaluator (and critique if needed) passes | `exit_reason` empty → **END** |
+| **Fallback** | Critique / REFUSAL loops hit caps | Evidence-only **fallback** → **END** (`is_refused` when applicable) |
+| **HITL pause** | `AMI_HITL_DIVERSITY=1` and retrieval density ≥ threshold | **`interrupt()`** at diversity gate — **no** final report until `resume_research` / dashboard resume |
+
+**Telemetry:** completed runs emit **`AMI_TELEMETRY`** (JSON line: `exit_reason`, `partial_answer`, `retrieval_revision_count`, …) for refusal-rate vs KG-coverage monitoring.
 
 ---
 
