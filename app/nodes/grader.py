@@ -7,6 +7,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
+from app.errors.llm_invoke import llm_failure_patch
 from app.llm_factory import get_critique_llm
 from app.policies.config import MAX_RETRIEVAL_REVISIONS
 from app.policies.evidence import meets_min_evidence
@@ -99,7 +100,14 @@ def grader_node(state: GraphState | dict) -> dict:
     structured_llm = llm.with_structured_output(GraderOutput)
 
     prompt = get_prompt("grader", "main", query=query, context_str=context_str)
-    result = structured_llm.invoke(prompt)
+    try:
+        result = structured_llm.invoke(prompt)
+    except Exception as e:
+        logger.warning("GRADER LLM failed: %s", e)
+        patch = llm_failure_patch(e, component="grader")
+        patch.update({"context_sufficient": False, "retrieval_revision_count": 1})
+        return patch
+
     sufficient = bool(result.sufficient) if hasattr(result, "sufficient") else False
 
     logger.info(

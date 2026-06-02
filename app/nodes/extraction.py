@@ -11,6 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from typing_extensions import Literal
 
+from app.errors.llm_invoke import llm_failure_patch
 from app.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,22 @@ def entity_extractor(state: GraphState | dict) -> dict:
         ]
     )
 
-    result = (prompt | structured_llm).invoke({"messages": query_for_extraction})
+    try:
+        result = (prompt | structured_llm).invoke({"messages": query_for_extraction})
+    except Exception as e:
+        logger.warning("EXTRACTOR LLM failed: %s", e)
+        patch = llm_failure_patch(e, component="extractor")
+        patch.update(
+            {
+                "entities": [],
+                "intent": "IRRELEVANT",
+                "response": (
+                    "Market intelligence routing is temporarily unavailable "
+                    "(upstream language model error). Please retry shortly."
+                ),
+            }
+        )
+        return patch
 
     # Memory safeguard: when query has anaphora, ensure prior entities are included
     entities = list(result.entities) if result.entities else []

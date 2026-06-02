@@ -112,6 +112,39 @@ def test_evaluate_escalation_max_revisions() -> None:
     assert reason == "max_refinement_cycles_exceeded"
 
 
+def test_evaluate_escalation_infrastructure_failure_max_revisions() -> None:
+    err = {
+        "is_error": True,
+        "error_category": "rate_limit",
+        "is_retryable": True,
+        "message": "429",
+    }
+    esc, reason = evaluate_escalation(
+        {"revision_count": 3, "query": "q", "last_error": err}
+    )
+    assert esc is True
+    assert reason == "infrastructure_failure_max_revisions"
+
+
+def test_evaluate_escalation_infrastructure_failure_retrieval() -> None:
+    err = {
+        "is_error": True,
+        "error_category": "service_unavailable",
+        "is_retryable": True,
+        "message": "neo4j down",
+    }
+    esc, reason = evaluate_escalation(
+        {
+            "retrieval_revision_count": 3,
+            "exit_reason": "max_retries_exceeded",
+            "last_error": err,
+            "query": "q",
+        }
+    )
+    assert esc is True
+    assert reason == "infrastructure_failure_retrieval_exhausted"
+
+
 @pytest.mark.asyncio
 async def test_human_request_routes_without_retrieve() -> None:
     from app.logic.workflow import make_initial_state

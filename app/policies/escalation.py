@@ -57,6 +57,18 @@ def evaluate_escalation(state: Any) -> tuple[bool, str]:
     )
     exit_reason = str(exit_reason or "").strip()
 
+    last_error = getattr(state, "last_error", None) or (
+        state.get("last_error") if isinstance(state, dict) else None
+    )
+    if last_error:
+        if revision_count >= MAX_REFINEMENT_REVISIONS:
+            return True, "infrastructure_failure_max_revisions"
+        if (
+            retrieval_rev >= MAX_RETRIEVAL_REVISIONS
+            and exit_reason == "max_retries_exceeded"
+        ):
+            return True, "infrastructure_failure_retrieval_exhausted"
+
     # Business threshold: max refinement cycles without passing quality gate
     if revision_count >= MAX_REFINEMENT_REVISIONS:
         return True, "max_refinement_cycles_exceeded"

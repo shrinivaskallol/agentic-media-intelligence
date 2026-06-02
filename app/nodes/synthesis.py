@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 from typing_extensions import Literal
 
 from app.errors.helpers import error_to_state_patch, internal_error
+from app.errors.llm_invoke import llm_failure_patch
 from app.llm_factory import get_llm
 from app.policies.synthesis_hooks import (
     check_citation_coverage,
@@ -184,6 +185,19 @@ def synthesis_node(state: GraphState | dict) -> dict:
                 e,
             )
             result = None
+            llm_err_patch = llm_failure_patch(e, component="synthesis")
+            if attempt == 1:
+                stub = (
+                    "## Report unavailable\n\n"
+                    "The synthesis step could not complete due to an upstream language model error."
+                )
+                return {
+                    "response": stub,
+                    "synthesis_status": "invalid_structured_output",
+                    "synthesis_confidence": 0.0,
+                    "synthesis_requires_critique": True,
+                    **llm_err_patch,
+                }
             continue
         status = normalize_llm_synthesis_status(getattr(result, "status", None))
         if status is not None:

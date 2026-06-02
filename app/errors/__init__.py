@@ -1,5 +1,6 @@
 """Structured errors for MCP tools, graph nodes, and external integrations."""
 
+from app.errors.exceptions import LLMInvocationError
 from app.errors.helpers import (
     auth_error,
     classify_exception,
@@ -19,7 +20,9 @@ from app.errors.helpers import (
     tool_response_from_state,
     validation_error,
 )
+from app.errors.llm_invoke import llm_failure_patch
 from app.errors.models import (
+    ConnectionSlice,
     EmptyResult,
     ErrorCategory,
     RetrievalSlice,
@@ -28,7 +31,9 @@ from app.errors.models import (
 )
 
 __all__ = [
+    "ConnectionSlice",
     "EmptyResult",
+    "LLMInvocationError",
     "ErrorCategory",
     "RetrievalSlice",
     "ToolError",
@@ -42,6 +47,7 @@ __all__ = [
     "format_mcp_error",
     "format_mcp_payload",
     "internal_error",
+    "llm_failure_patch",
     "merge_retrieval_errors",
     "not_found_error",
     "rate_limit_error",

@@ -23,6 +23,12 @@ _REASON_COPY = {
     "policy_gap_insufficient_grounding": (
         "Evidence was retrieved, but the system could not produce a policy-compliant grounded answer."
     ),
+    "infrastructure_failure_max_revisions": (
+        "An upstream service error persisted after the maximum number of quality revision attempts."
+    ),
+    "infrastructure_failure_retrieval_exhausted": (
+        "Retrieval backends reported failures through repeated rewrite cycles; automated recovery stopped."
+    ),
 }
 
 
@@ -56,4 +62,5 @@ def human_review_node(state: GraphState | dict) -> dict:
         "requires_human_review": True,
         "is_refused": True,
         "exit_reason": "requires_human_review",
+        "escalation_reason": reason,
     }

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+# connection on ConnectionSlice is an opaque driver handle (psycopg2 / neo4j)
+
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
@@ -52,6 +54,18 @@ class ToolResponse(BaseModel):
     error: ToolError | None = None
     empty_result: EmptyResult | None = None
     context: dict[str, Any] | None = None
+
+
+class ConnectionSlice(BaseModel):
+    """Database connection attempt with optional structured failure."""
+
+    resource: Literal["postgres", "neo4j"] = "postgres"
+    connection: Any | None = None
+    error: ToolError | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.connection is not None
 
 
 class RetrievalSlice(BaseModel):

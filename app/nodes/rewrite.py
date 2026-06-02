@@ -7,6 +7,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
+from app.errors.llm_invoke import llm_failure_patch
 from app.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,14 @@ def rewrite_node(state: GraphState | dict) -> dict:
 
     entities_str = ", ".join(str(e) for e in entities) if entities else "(none)"
     prompt = get_prompt("rewrite", "main", query=query, entities=entities_str)
-    result = structured_llm.invoke(prompt)
+    try:
+        result = structured_llm.invoke(prompt)
+    except Exception as e:
+        logger.warning("REWRITE LLM failed: %s", e)
+        patch = llm_failure_patch(e, component="rewrite")
+        patch.update({"query": query, "entities": entities})
+        return patch
+
     rewritten = result.rewritten_query.strip() if hasattr(result, "rewritten_query") else query
     suggested = result.suggested_entities if hasattr(result, "suggested_entities") else entities
 

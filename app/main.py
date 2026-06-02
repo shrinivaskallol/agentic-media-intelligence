@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.errors.helpers import classify_exception, tool_response_from_state
 from app.graph.entity_workflow import build_workflow, get_checkpoint_db_path
-from app.tools.db_utils import connect_postgres, get_neo4j_driver
+from app.tools.db_utils import connect_postgres_result, get_neo4j_driver
 
 
 def _make_initial_state(query: str) -> dict:
@@ -116,9 +116,9 @@ def health() -> HealthResponse:
 
     # Check Postgres
     try:
-        conn = connect_postgres()
-        if conn:
-            conn.close()
+        pg = connect_postgres_result()
+        if pg.ok and pg.connection:
+            pg.connection.close()
             postgres_ok = True
     except OSError:
         pass

@@ -15,7 +15,7 @@ from neo4j.exceptions import DriverError, ServiceUnavailable
 
 from app.errors.helpers import classify_exception, retrieval_slice_from_exception
 from app.errors.models import RetrievalSlice
-from app.tools.db_utils import connect_postgres, get_neo4j_driver
+from app.tools.db_utils import connect_postgres_result, get_neo4j_driver
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
@@ -74,10 +74,14 @@ class UnifiedRetriever:
         chunks: list[VectorResult] = []
         chunk_ids: list[str] = []
         try:
-            conn = connect_postgres()
-            if conn is None:
-                logger.warning("Postgres connection failed; skipping vector search")
+            pg = connect_postgres_result()
+            if not pg.ok:
+                if pg.error:
+                    logger.warning(
+                        "Postgres connection failed: %s", pg.error.message
+                    )
                 return chunks, chunk_ids
+            conn = pg.connection
             try:
                 embedder = self._get_embedder()
                 query_vector = embedder.encode(query, convert_to_numpy=True)
