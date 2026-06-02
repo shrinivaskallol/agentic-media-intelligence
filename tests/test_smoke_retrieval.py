@@ -14,7 +14,8 @@ def test_graph_retrieval():
     """Graph (Neo4j) returns results or empty list."""
     entities = ["Nvidia", "TSMC", "GPU"]
     result = get_graph_context(entities, limit=15)
-    assert isinstance(result, list)
+    assert hasattr(result, "items")
+    assert isinstance(result.items, list)
 
 
 @pytest.mark.integration
@@ -23,20 +24,22 @@ def test_vector_retrieval():
     pytest.importorskip("sentence_transformers", reason="Vector needs sentence_transformers")
     from app.tools.retriever import get_vector_context
 
-    result, _, _ = get_vector_context("Who are Nvidia's supply chain partners?", limit=5)
+    result, _, _, slice_ = get_vector_context("Who are Nvidia's supply chain partners?", limit=5)
     assert isinstance(result, list)
+    assert slice_ is not None
 
 
 @pytest.mark.integration
 def test_at_least_one_source_operational():
     """At least graph or vector returns data (data layer operational)."""
     entities = ["Nvidia", "TSMC"]
-    graph_bits = get_graph_context(entities, limit=5)
+    graph_slice = get_graph_context(entities, limit=5)
+    graph_bits = graph_slice.items
     vector_bits = []
     try:
         from app.tools.retriever import get_vector_context
 
-        vector_bits, _, _ = get_vector_context("Nvidia TSMC", limit=3)
+        vector_bits, _, _, _ = get_vector_context("Nvidia TSMC", limit=3)
     except Exception:
         pass
     assert graph_bits or vector_bits, "Both sources empty; check Docker and ingestion"

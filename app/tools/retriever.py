@@ -13,6 +13,8 @@ import numpy as np
 import psycopg2
 from neo4j.exceptions import DriverError, ServiceUnavailable
 
+from app.errors.helpers import classify_exception, retrieval_slice_from_exception
+from app.errors.models import RetrievalSlice
 from app.tools.db_utils import connect_postgres, get_neo4j_driver
 
 if TYPE_CHECKING:
@@ -241,7 +243,7 @@ def _get_embedder():
     return _default_embedder
 
 
-def get_graph_context(entities: list[str], limit: int = 15) -> list[str]:
+def get_graph_context(entities: list[str], limit: int = 15) -> RetrievalSlice:
     """Delegates to app.logic.retrieval for multi-hop graph context."""
     from app.logic.retrieval import get_graph_context as _get_graph_context
 
@@ -320,12 +322,13 @@ def get_vector_context(
     query_vector: list[float] | None = None,
     limit: int = 5,
     mmr_lambda: float = 1.0,
-) -> tuple[list[str], list[str], list[dict]]:
+) -> tuple[list[str], list[str], list[dict], RetrievalSlice | None]:
     """
     Finds semantically relevant text chunks from Postgres.
     When mmr_lambda < 1.0, applies MMR on top of vector similarity (fetch_k > limit).
 
-    Returns (context_bits, chunk_ids, metadata) for structured context with entity types.
+    Returns (context_bits, chunk_ids, metadata, error_slice).
+    error_slice is set when Postgres/embedding failed; empty results with no error mean no_evidence.
     metadata: list of {"entity": str, "entity_type": str} for [ENTITY_TYPE] entity: content format.
     """
     from app.tools.db_utils import get_pg_conn
@@ -340,6 +343,7 @@ def get_vector_context(
     context_bits: list[str] = []
     chunk_ids: list[str] = []
     metadata: list[dict] = []
+    error_slice: RetrievalSlice | None = None
 
     use_mmr = mmr_lambda < 1.0 - 1e-9
     fetch_k = max(limit * 4, limit + 1) if use_mmr else limit
@@ -463,6 +467,13 @@ def get_vector_context(
         conn.close()
     except (psycopg2.OperationalError, psycopg2.Error, OSError) as e:
         logger.warning("get_vector_context failed: %s", e)
+        error_slice = retrieval_slice_from_exception(
+            e, backend="postgres", operation="get_vector_context"
+        )
+    except Exception as e:
+        logger.warning("get_vector_context unexpected failure: %s", e)
+        err = classify_exception(e, component="postgres", operation="get_vector_context")
+        error_slice = RetrievalSlice(items=[], error=err)
 
     if use_mmr and context_bits:
         logger.info(
@@ -473,7 +484,10 @@ def get_vector_context(
             limit,
         )
 
-    return context_bits, chunk_ids, metadata
+    if error_slice is None and not context_bits:
+        error_slice = RetrievalSlice(items=[], empty=True)
+
+    return context_bits, chunk_ids, metadata, error_slice
 
 
 def _get_default_retriever() -> UnifiedRetriever:

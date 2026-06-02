@@ -10,6 +10,9 @@ from typing import Any
 
 from neo4j.exceptions import DriverError, ServiceUnavailable
 
+from app.errors.helpers import classify_exception, retrieval_slice_from_exception
+from app.errors.models import RetrievalSlice
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +45,7 @@ def _parse_graph_results(records: list[dict[str, Any]]) -> list[str]:
     return formatted
 
 
-def get_graph_context(entities: list[str], limit: int = 25) -> list[str]:
+def get_graph_context(entities: list[str], limit: int = 25) -> RetrievalSlice:
     """
     Expands context by finding neighbors of extracted entities in Neo4j.
     Uses variable-length paths (1..3 hops) for Tier-3 supply chain traversal.
@@ -50,7 +53,7 @@ def get_graph_context(entities: list[str], limit: int = 25) -> list[str]:
     Handles entities identified by id or name.
     """
     if not entities:
-        return []
+        return RetrievalSlice(items=[], empty=True)
 
     context_bits: list[str] = []
     try:
@@ -90,7 +93,16 @@ def get_graph_context(entities: list[str], limit: int = 25) -> list[str]:
         driver.close()
 
         context_bits = _parse_graph_results(records)
+        return RetrievalSlice(
+            items=context_bits,
+            empty=not context_bits,
+        )
     except (ServiceUnavailable, DriverError, OSError) as e:
         logger.warning("get_graph_context failed: %s", e)
-
-    return context_bits
+        return retrieval_slice_from_exception(
+            e, backend="neo4j", operation="get_graph_context"
+        )
+    except Exception as e:
+        logger.warning("get_graph_context unexpected failure: %s", e)
+        err = classify_exception(e, component="neo4j", operation="get_graph_context")
+        return RetrievalSlice(items=[], error=err)

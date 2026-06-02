@@ -21,6 +21,8 @@ def make_initial_state(query: str) -> dict:
         "revision_count": 0,
         "exit_reason": "",
         "partial_answer": False,
+        "requires_human_review": False,
+        "escalation_reason": "",
     }
 
 

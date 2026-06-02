@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from pydantic import BaseModel, Field
 
+from app.errors.helpers import classify_exception, tool_response_from_state
 from app.graph.entity_workflow import build_workflow, get_checkpoint_db_path
 from app.tools.db_utils import connect_postgres, get_neo4j_driver
 
@@ -78,12 +79,20 @@ async def chat(request: ChatRequest) -> dict:
     try:
         final_state = await workflow.ainvoke(inputs, config)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        err = classify_exception(e, component="api", operation="chat")
+        status = 503 if err.error_category == "service_unavailable" else 500
+        if err.error_category == "rate_limit":
+            status = 429
+        raise HTTPException(status_code=status, detail=err.model_dump()) from e
 
-    # Return state as dict (Pydantic model or dict)
     if hasattr(final_state, "model_dump"):
-        return final_state.model_dump()
-    return dict(final_state) if final_state else {}
+        state_dict = final_state.model_dump()
+    else:
+        state_dict = dict(final_state) if final_state else {}
+
+    envelope = tool_response_from_state(state_dict)
+    state_dict["tool_response"] = envelope.model_dump()
+    return state_dict
 
 
 @app.get("/health", response_model=HealthResponse)

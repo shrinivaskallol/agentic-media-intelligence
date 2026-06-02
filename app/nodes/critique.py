@@ -23,7 +23,10 @@ class CritiqueOutput(BaseModel):
         le=1.0,
     )
     feedback: str = Field(
-        description="Bulleted list of corrections, or 'PASS' if score is 1.0.",
+        description=(
+            "Bulleted list of specific corrections, or 'PASS' if score >= 0.85 with no "
+            "grounding or category errors."
+        ),
     )
 
 
