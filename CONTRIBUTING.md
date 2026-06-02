@@ -65,9 +65,3 @@ Do **not** open issues or PRs that contain **API keys**, `.env` contents, or pro
 - `scripts/` — Operational scripts (seed, init, run workflow)
 - `tests/` — Pytest tests (unit + integration)
 
-## Maintainer checklist (before “Public” on GitHub)
-
-- [ ] **CI green** on `main` / `master` (Ruff + unit tests).
-- [ ] **No `.env` in git history** — use `git log --all --diff-filter=A --name-only -- .env` (exact path); empty output is clean. *Note:* `git log -- '.env*'` also lists **`.env.example`**, which is meant to be tracked.
-- [ ] **Rotate keys** if `.env` was ever leaked (chat, screenshot, gist).
-- [ ] **Hero image** — optional real `docs/streamlit-executive-summary.png` ([docs/DEMO.md](docs/DEMO.md)).

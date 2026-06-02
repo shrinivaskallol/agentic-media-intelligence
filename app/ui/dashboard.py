@@ -32,6 +32,7 @@ load_dotenv(_root / ".env", override=True)
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
+from app.errors.models import ToolError
 from app.graph.entity_workflow import build_workflow
 from app.logic.workflow import make_initial_state
 from app.ui.workflow_stream import iter_workflow_dashboard_events
@@ -91,12 +92,45 @@ def iter_remote_sse(base: str, path: str, params: dict[str, str]):
                             yield json.loads(raw_line[6:].decode("utf-8"))
 
 
+def _format_tool_error(err: dict[str, Any]) -> str:
+    """Human-readable summary from serialized ToolError."""
+    try:
+        te = ToolError.model_validate(err)
+    except Exception:
+        return str(err.get("message") or err)
+    retry = "retryable" if te.is_retryable else "not retryable"
+    return f"**{te.error_category}** ({retry}): {te.message}"
+
+
+def _render_structured_error(ev: dict[str, Any], container) -> None:
+    err = ev.get("error")
+    if isinstance(err, dict):
+        container.error(_format_tool_error(err))
+    elif ev.get("message"):
+        container.error(ev.get("message"))
+
+
+def _render_tool_response(tr: dict[str, Any], container) -> None:
+    """Render ToolResponse envelope from done events or final state."""
+    status = tr.get("status")
+    if status == "error" and tr.get("error"):
+        container.error(_format_tool_error(tr["error"]))
+    elif status == "empty_result" and tr.get("empty_result"):
+        er = tr["empty_result"]
+        msg = er.get("message") if isinstance(er, dict) else str(er)
+        container.warning(f"**No evidence** — {msg}")
+    elif status == "interrupted":
+        container.info("Workflow paused for HITL (MMR λ). Use **Resume with λ** below.")
+
+
 def _render_pulse(ev: dict[str, Any], container) -> None:
     t = ev.get("type")
     if t == "node_start":
         container.markdown(f"▸ **`{ev.get('node')}`**")
     elif t == "tool_start":
         container.caption(f"tool: `{ev.get('name')}`")
+    elif t == "error":
+        _render_structured_error(ev, container)
     elif t == "status":
         sub = ev.get("status")
         if sub == "refusal":
@@ -109,6 +143,8 @@ def _apply_done_event(ev: dict[str, Any]) -> None:
     """Mirror session_state updates from a terminal ``done`` event."""
     status = ev.get("status")
     st.session_state["last_done_status"] = status
+    if ev.get("tool_response"):
+        st.session_state["tool_response"] = ev["tool_response"]
     if status == "interrupted":
         st.session_state["awaiting_resume"] = True
         st.session_state["final_state"] = ev.get("state") or {}
@@ -285,10 +321,24 @@ def main() -> None:
                     st.session_state["last_done_status"] = final.get("status")
                 st.rerun()
 
+    if st.session_state.get("tool_response"):
+        tr = st.session_state["tool_response"]
+        with st.container():
+            st.subheader("Run status")
+            _render_tool_response(tr, st)
+
     if st.session_state.get("final_state"):
         st.markdown("---")
         st.subheader("Executive summary")
         fs = st.session_state["final_state"]
+        if fs.get("last_error") and isinstance(fs["last_error"], dict):
+            with st.expander("Infrastructure / operation error", expanded=True):
+                st.markdown(_format_tool_error(fs["last_error"]))
+        if fs.get("retrieval_errors"):
+            with st.expander("Retrieval backend errors"):
+                for i, err in enumerate(fs["retrieval_errors"], 1):
+                    if isinstance(err, dict):
+                        st.markdown(f"{i}. {_format_tool_error(err)}")
         summary_raw = (fs.get("content") or fs.get("response") or "").strip()
         done_status = st.session_state.get("last_done_status")
         cite_map = get_citation_map(fs)

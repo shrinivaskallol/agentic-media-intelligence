@@ -9,7 +9,9 @@ import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
+from typing_extensions import Literal
 
+from app.errors.llm_invoke import llm_failure_patch
 from app.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
@@ -51,14 +53,27 @@ def _rewrite_query(query: str, prior_entities: list[str], history: list[dict], l
 class ExtractionSchema(BaseModel):
     """Gatekeeper schema: entities, intent, and user-facing status."""
 
-    entities: list[str] = Field(description="Companies or tech terms. Leave empty if IRRELEVANT.")
-    intent: str = Field(description="Must be one of: RESEARCH, COMPETITION, or IRRELEVANT.")
+    entities: list[str] = Field(
+        description=(
+            "Companies, products, or tech terms central to the query. "
+            "Leave empty when intent is IRRELEVANT or is_in_scope is false."
+        ),
+    )
+    intent: Literal["RESEARCH", "COMPETITION", "IRRELEVANT"] = Field(
+        description=(
+            "RESEARCH: industry/company/supply-chain intelligence. "
+            "COMPETITION: competitive or head-to-head analysis. "
+            "IRRELEVANT: in-domain wording but not a research task "
+            "(use is_in_scope=false for clearly off-topic queries instead)."
+        ),
+    )
     is_in_scope: bool = Field(
         default=True,
         description=(
-            "False only if unrelated to semiconductor supply chains, finance, or market intelligence. "
-            "True for semiconductor/company/supply-chain questions even if the named company is unknown, "
-            "hypothetical, or non-existent (answer may be 'no data')."
+            "False only if unrelated to semiconductor supply chains, finance, or market intelligence "
+            "(e.g. weather, recipes, sports). True for semiconductor/company/supply-chain questions "
+            "even if the named company is unknown, hypothetical, or non-existent (answer may be 'no data'). "
+            "Do not set false merely because an entity is fictional."
         ),
     )
     log_message: str = Field(
@@ -112,7 +127,22 @@ def entity_extractor(state: GraphState | dict) -> dict:
         ]
     )
 
-    result = (prompt | structured_llm).invoke({"messages": query_for_extraction})
+    try:
+        result = (prompt | structured_llm).invoke({"messages": query_for_extraction})
+    except Exception as e:
+        logger.warning("EXTRACTOR LLM failed: %s", e)
+        patch = llm_failure_patch(e, component="extractor")
+        patch.update(
+            {
+                "entities": [],
+                "intent": "IRRELEVANT",
+                "response": (
+                    "Market intelligence routing is temporarily unavailable "
+                    "(upstream language model error). Please retry shortly."
+                ),
+            }
+        )
+        return patch
 
     # Memory safeguard: when query has anaphora, ensure prior entities are included
     entities = list(result.entities) if result.entities else []

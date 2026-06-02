@@ -2,6 +2,17 @@ import operator
 from typing import Annotated
 
 from pydantic import BaseModel, Field
+from typing_extensions import Literal
+
+
+SynthesisStatus = Literal[
+    "",
+    "complete",
+    "insufficient_data",
+    # runtime-only (not emitted by the structured LLM schema)
+    "no_evidence",
+    "invalid_structured_output",
+]
 
 
 class GraphState(BaseModel):
@@ -109,12 +120,58 @@ class GraphState(BaseModel):
 
     exit_reason: str = Field(
         default="",
-        description="Terminal reason: out_of_scope, max_retries_exceeded, or empty when normal.",
+        description=(
+            "Terminal reason: out_of_scope, max_retries_exceeded, requires_human_review, "
+            "or empty when normal."
+        ),
     )
 
     partial_answer: bool = Field(
         default=False,
         description="True when synthesis should produce best-effort output after grader max retries.",
+    )
+
+    synthesis_status: SynthesisStatus = Field(
+        default="",
+        description=(
+            "Synthesis verdict (strict): "
+            '"complete" | "insufficient_data" (from LLM structured output), '
+            '"no_evidence" (runtime: no indexed evidence after retrieval limits), '
+            '"invalid_structured_output" (runtime: schema/status invalid after retry), '
+            'or "" when unset.'
+        ),
+    )
+    synthesis_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Model-reported confidence 0-1 from structured synthesis output.",
+    )
+    synthesis_requires_critique: bool = Field(
+        default=False,
+        description="Structured flag: route to critique for self-correction when true.",
+    )
+
+    requires_human_review: bool = Field(
+        default=False,
+        description="Deterministic escalation: route to human_review node when true.",
+    )
+    escalation_reason: str = Field(
+        default="",
+        description="Machine-readable escalation code (e.g. user_requested_human, policy_gap_insufficient_grounding).",
+    )
+
+    last_error: dict | None = Field(
+        default=None,
+        description=(
+            "Serialized ToolError from infrastructure/operation failures (not no-evidence outcomes). "
+            "See app.errors.models.ToolError."
+        ),
+    )
+
+    retrieval_errors: list[dict] = Field(
+        default_factory=list,
+        description="Per-backend ToolError dicts from retrieve (graph/vector) when a datastore call failed.",
     )
 
     class Config:

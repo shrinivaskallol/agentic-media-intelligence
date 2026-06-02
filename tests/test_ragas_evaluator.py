@@ -114,11 +114,39 @@ async def test_evaluation_node_skips_when_no_context() -> None:
 
 @pytest.mark.asyncio
 async def test_evaluation_node_skips_on_refusal() -> None:
-    """When response is REFUSAL, evaluation_node returns eval_score=1.0 and is_refused=True."""
+    """When synthesis_status is insufficient_data, skip Judge and set is_refused=True."""
     state = {
         "query": "test",
-        "response": "REFUSAL: INSUFFICIENT_DATA",
+        "response": "I could not ground this in the retrieved evidence.",
         "context": ["some context"],
+        "synthesis_status": "insufficient_data",
+    }
+    result = await evaluation_node(state)
+    assert result["eval_score"] == 1.0
+    assert result["is_refused"] is True
+
+
+@pytest.mark.asyncio
+async def test_evaluation_node_skips_on_no_evidence() -> None:
+    """no_evidence skips Judge like a data-gap verdict."""
+    state = {
+        "query": "test",
+        "response": "## No evidence",
+        "context": ["some context"],
+        "synthesis_status": "no_evidence",
+    }
+    result = await evaluation_node(state)
+    assert result["eval_score"] == 1.0
+    assert result["is_refused"] is True
+
+
+@pytest.mark.asyncio
+async def test_evaluation_node_skips_on_invalid_structured_output() -> None:
+    state = {
+        "query": "test",
+        "response": "stub",
+        "context": ["some context"],
+        "synthesis_status": "invalid_structured_output",
     }
     result = await evaluation_node(state)
     assert result["eval_score"] == 1.0

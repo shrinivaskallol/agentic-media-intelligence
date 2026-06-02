@@ -6,10 +6,13 @@ Runs both in parallel. Behavior varies by intent (RESEARCH vs COMPETITION).
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from app.errors.helpers import error_to_dict, merge_retrieval_errors, service_unavailable_error
+from app.errors.models import RetrievalSlice
+from app.policies.retrieval import apply_retrieval_budget, check_retrieval_circuit_breaker
 from app.state.schema import GraphState
+from app.tools.retriever import get_graph_context, get_vector_context
 
 logger = logging.getLogger(__name__)
-from app.tools.retriever import get_graph_context, get_vector_context
 
 
 def hybrid_retrieval_node(state: GraphState) -> dict:
@@ -23,12 +26,20 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
       less pgvector.
     - IRRELEVANT: This node does not run (router short-circuits).
     """
+    breaker_patch = check_retrieval_circuit_breaker(state)
+    if breaker_patch is not None:
+        return breaker_patch
+
     query = state.query
     entities = state.entities
     intent = getattr(state, "intent", None) or (
         state.get("intent", "") if isinstance(state, dict) else ""
     )
     intent = str(intent).strip().upper() or "RESEARCH"
+
+    entities, graph_limit, vector_limit = apply_retrieval_budget(
+        list(entities or []), intent
+    )
 
     if isinstance(state, dict):
         raw_mmr = state.get("mmr_lambda", 1.0)
@@ -40,26 +51,20 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
         mmr_lambda = 1.0
     mmr_lambda = max(0.0, min(1.0, mmr_lambda))
 
-    # Context window caps: Top 5 graph facts, Top 3 vector chunks (stay under Groq 6k TPM)
-    if intent == "COMPETITION":
-        graph_limit = 5
-        vector_limit = 3
-    else:
-        # RESEARCH or fallback
-        graph_limit = 5
-        vector_limit = 3
-
-    def _fetch_graph():
+    def _fetch_graph() -> RetrievalSlice:
         return get_graph_context(entities, limit=graph_limit)
 
-    def _fetch_vector():
-        return get_vector_context(query, limit=vector_limit, mmr_lambda=mmr_lambda)
+    def _fetch_vector() -> tuple[list[str], list[str], list[dict], RetrievalSlice | None]:
+        bits, cids, meta, err_slice = get_vector_context(
+            query, limit=vector_limit, mmr_lambda=mmr_lambda
+        )
+        return bits, cids, meta, err_slice
 
-    # Run both retrievals in parallel
-    graph_bits: list[str] = []
+    graph_slice = RetrievalSlice(items=[])
     vector_bits: list[str] = []
     chunk_ids: list[str] = []
     vector_metadata: list[dict] = []
+    vector_slice: RetrievalSlice | None = None
 
     with ThreadPoolExecutor(max_workers=2) as ex:
         futures = {
@@ -71,13 +76,29 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
             try:
                 result = fut.result()
                 if name == "graph":
-                    graph_bits = result
+                    graph_slice = result
                 else:
-                    vector_bits, chunk_ids, vector_metadata = result
-            except (OSError, ConnectionError, RuntimeError, TypeError, ValueError):
-                pass  # Tools log their own warnings
+                    vector_bits, chunk_ids, vector_metadata, vector_slice = result
+            except (OSError, ConnectionError, RuntimeError, TypeError, ValueError) as e:
+                logger.warning("RETRIEVE %s task failed: %s", name, e)
+                from app.errors.helpers import retrieval_slice_from_exception
 
-    # Structured context with source IDs for closed-world grounding citations
+                failed = retrieval_slice_from_exception(
+                    e, backend=name, operation="hybrid_retrieval_node"
+                )
+                if name == "graph":
+                    graph_slice = failed
+                else:
+                    vector_slice = failed
+
+    graph_bits = graph_slice.items
+    vector_result_slice = (
+        vector_slice
+        if vector_slice is not None
+        else RetrievalSlice(items=vector_bits, empty=not vector_bits)
+    )
+    retrieval_errors = merge_retrieval_errors(graph_slice, vector_result_slice)
+
     structured_parts: list[str] = []
     for i, bit in enumerate(vector_bits):
         cid = chunk_ids[i] if i < len(chunk_ids) else str(i)
@@ -115,9 +136,25 @@ def hybrid_retrieval_node(state: GraphState) -> dict:
     retrieved_meta = [
         {"entity": m.get("entity"), "type": m.get("entity_type")} for m in vector_metadata
     ]
-    return {
+
+    out: dict = {
         "context": combined_context,
         "retrieved_ids": chunk_ids,
         "retrieved_metadata": retrieved_meta,
         "pending_mmr_refetch": False,
+        "retrieval_errors": retrieval_errors,
     }
+
+    graph_failed = graph_slice.failed
+    vector_failed = vector_slice is not None and vector_slice.failed
+    if graph_failed and vector_failed:
+        out["last_error"] = error_to_dict(
+            service_unavailable_error(
+                "Both graph and vector retrieval backends failed.",
+                retrieval_errors=retrieval_errors,
+            )
+        )
+    elif retrieval_errors:
+        out["last_error"] = retrieval_errors[-1]
+
+    return out

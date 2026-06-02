@@ -7,9 +7,11 @@ import logging
 
 from pydantic import BaseModel, Field, ValidationError
 
+from app.errors.helpers import classify_exception, error_to_state_patch
 from app.llm_factory import get_critique_llm
 from app.prompts import get_prompt, get_system
 from app.state.schema import GraphState
+from app.utils.routing import synthesis_skip_faithfulness_judge
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ async def evaluation_node(state: GraphState | dict) -> dict:
             "is_refused": False,
         }
 
-    if "REFUSAL: INSUFFICIENT_DATA" in (response or ""):
+    if synthesis_skip_faithfulness_judge(state):
         return {
             "eval_score": 1.0,
             "ragas_scores": None,
@@ -140,9 +142,13 @@ async def evaluation_node(state: GraphState | dict) -> dict:
         }
     except (ValueError, ValidationError, OSError, RuntimeError) as e:
         logger.warning("Evaluator Judge failed: %s", e)
+        err = classify_exception(e, component="evaluator", operation="evaluation_node")
         return {
-            "eval_score": 0.85,
+            "eval_score": 0.0,
             "ragas_scores": None,
-            "critique_instruction": "",
+            "critique_instruction": (
+                "Evaluator unavailable; route to critique for manual quality check."
+            ),
             "is_refused": False,
+            **error_to_state_patch(err),
         }

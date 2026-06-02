@@ -50,5 +50,10 @@ human_template:
     CRITICAL INSTRUCTION:
     If the evidence does not provide a direct answer, do NOT hallucinate. Instead, provide a "Technical Delta" report: explain what the data states about the entities (e.g., node differences like 4NP vs 3nm) and only discuss indirect implications that are clearly supported by cited graph or vector facts.
     Do not introduce tools, regulations, shipment counts, or companies that do not appear in RETRIEVED CONTEXT. In "Strategic Implications," stay on the user question—omit tangential graph nodes unless they clearly support the answer.
-    If the provided context is completely IRRELEVANT to the user's query (e.g., query is about chips, context is about unrelated topics), output exactly: REFUSAL: INSUFFICIENT_DATA
+
+    STRUCTURED OUTPUT (required by the runtime — fill the schema fields; do not rely on magic strings):
+    - Set status to "insufficient_data" when RETRIEVED CONTEXT is completely irrelevant to the query or cannot support any grounded answer; set requires_critique true so the graph can run self-correction.
+    - Otherwise set status "complete", requires_critique false, confidence reflecting how well the evidence covers the query (0.0–1.0).
+    - Runtime-only (not from the LLM): if there is no indexed evidence after retrieval limits, the node sets status "no_evidence" without calling you.
+    - Put the full user-visible report (Markdown, sections above) in report_markdown only — not in a separate magic-token format.
   template_vars: ["query", "intent", "context", "revision_instruction"]

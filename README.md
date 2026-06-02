@@ -189,14 +189,14 @@ Stderr prints `[MCP config] …` so you can confirm HITL flags.
 
 **Observability**
 
-| Mode | `research_company` | `resume_research` |
+| Mode | `run_market_research` | `resume_research` |
 |------|--------------------|-------------------|
 | HITL off | Streams `astream_events` to terminal | — |
 | HITL on | Runs until interrupt or done; interrupt JSON when paused | Streams after resume + **`lambda_value`** |
 
 **Tool flow (API names use code-style parameters):**
 
-1. `research_company` — pass **query** + **thread_id**.
+1. `run_market_research` — pass **query** + **thread_id**.
 2. On interrupt → `resume_research` — same **thread_id**, **`lambda_value`** ∈ [0, 1] (this is the numeric MMR weight; in prose we call it **λ**).
 
 **Dashboard SSE** (same process as MCP): `GET /ami/dashboard/stream?query=...&thread_id=...`, `GET /ami/dashboard/resume/stream?thread_id=...&lambda_value=...`

@@ -10,7 +10,40 @@ _proj = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_proj))
 
 from app.state.schema import GraphState
-from app.utils.routing import route_after_eval
+from app.utils.routing import (
+    normalize_llm_synthesis_status,
+    route_after_eval,
+    synthesis_retrieval_coverage_gap,
+    synthesis_routes_to_critique,
+    synthesis_skip_faithfulness_judge,
+)
+
+
+def test_normalize_llm_synthesis_status() -> None:
+    assert normalize_llm_synthesis_status("complete") == "complete"
+    assert normalize_llm_synthesis_status("Insufficient_Data") == "insufficient_data"
+    assert normalize_llm_synthesis_status("") is None
+    assert normalize_llm_synthesis_status("no_evidence") is None
+    assert normalize_llm_synthesis_status(1) is None
+
+
+def test_synthesis_skip_faithfulness_judge_statuses() -> None:
+    assert synthesis_skip_faithfulness_judge({"synthesis_status": "no_evidence"}) is True
+    assert synthesis_skip_faithfulness_judge({"synthesis_status": "invalid_structured_output"}) is True
+    assert synthesis_skip_faithfulness_judge({"synthesis_status": "complete"}) is False
+
+
+def test_synthesis_routes_to_critique() -> None:
+    assert synthesis_routes_to_critique({"synthesis_status": "insufficient_data"}) is True
+    assert synthesis_routes_to_critique({"synthesis_status": "invalid_structured_output"}) is True
+    assert synthesis_routes_to_critique({"synthesis_status": "no_evidence"}) is False
+    assert synthesis_routes_to_critique({"synthesis_requires_critique": True}) is True
+
+
+def test_synthesis_retrieval_coverage_gap() -> None:
+    assert synthesis_retrieval_coverage_gap({"synthesis_status": "insufficient_data"}) is True
+    assert synthesis_retrieval_coverage_gap({"synthesis_status": "no_evidence"}) is True
+    assert synthesis_retrieval_coverage_gap({"synthesis_status": "invalid_structured_output"}) is False
 
 
 def test_route_after_eval_returns_critique_when_score_05() -> None:

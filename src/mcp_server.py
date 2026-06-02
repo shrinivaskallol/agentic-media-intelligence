@@ -12,7 +12,8 @@ Stdio (JSON-RPC for Cursor "command" MCP):
 FastMCP: ``transport="sse"`` serves ``/sse``; ``transport="http"`` serves ``/mcp`` (Streamable HTTP).
 
 HITL (MMR λ): set ``AMI_HITL_DIVERSITY=1`` in ``.env``. When enough context chunks are retrieved,
-the graph interrupts; call ``resume_research`` with the same ``thread_id`` and ``lambda_value``.
+the graph interrupts; call ``resume_research`` with the same ``thread_id`` and ``lambda_value``
+after ``run_market_research`` returns an interrupt payload.
 
 Dashboard SSE (Streamlit): ``GET /ami/dashboard/stream?query=...&thread_id=...`` and
 ``GET /ami/dashboard/resume/stream?thread_id=...&lambda_value=...`` — custom HTTP routes on the
@@ -23,7 +24,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 _proj = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_proj))
@@ -40,10 +41,17 @@ from app.utils.suppress_async_noise import install_suppress_async_noise
 install_suppress_async_noise()
 
 from fastmcp import FastMCP
+from pydantic import Field
 from langgraph.types import Command
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
+from app.errors.helpers import (
+    classify_exception,
+    finalize_mcp_workflow_response,
+    format_mcp_error,
+    validation_error,
+)
 from app.graph.entity_workflow import build_workflow
 from app.logic.workflow import make_initial_state
 from app.services.telemetry import log_workflow_outcome
@@ -86,9 +94,9 @@ def _log_mcp_startup_banner() -> None:
     except ValueError:
         min_ctx = 3
     mode = (
-        "HITL ON — research_company uses ainvoke until interrupt; resume_research streams (astream_events)"
+        "HITL ON — run_market_research uses ainvoke until interrupt; resume_research streams"
         if hitl
-        else "HITL OFF — research_company uses astream_events (no interrupt pause)"
+        else "HITL OFF — run_market_research streams to completion (no interrupt pause)"
     )
     print(
         f"[MCP config] AMI_HITL_DIVERSITY={'enabled' if hitl else 'disabled'} "
@@ -147,32 +155,16 @@ async def _merge_state_from_astream_events(
     return merged_state
 
 
-def _interrupt_response(rd: dict[str, Any], thread_id: str) -> str:
-    intrs = rd.get("__interrupt__") or []
-    serialized = []
-    for it in intrs:
-        if hasattr(it, "value"):
-            serialized.append({"value": it.value, "id": getattr(it, "id", None)})
-        else:
-            serialized.append(str(it))
-    return json.dumps(
-        {
-            "status": "interrupted",
-            "thread_id": thread_id,
-            "interrupt": serialized,
-            "hint": "Call resume_research(thread_id=..., lambda_value=0.0-1.0) with the same thread_id.",
-        },
-        indent=2,
-    )
-
-
 @mcp.custom_route("/ami/dashboard/stream", methods=["GET"])
 async def ami_dashboard_workflow_stream(request: Request) -> StreamingResponse | JSONResponse:
     """SSE of LangGraph node/tool events + final state (for Streamlit or other clients)."""
     query = (request.query_params.get("query") or "").strip()
     thread_id = (request.query_params.get("thread_id") or "dashboard").strip()
     if not query:
-        return JSONResponse({"error": "query parameter required"}, status_code=400)
+        return JSONResponse(
+            validation_error("query parameter required", field="query").model_dump(),
+            status_code=400,
+        )
 
     app = get_mcp_workflow()
     inputs = make_initial_state(query)
@@ -183,7 +175,12 @@ async def ami_dashboard_workflow_stream(request: Request) -> StreamingResponse |
             async for ev in iter_workflow_dashboard_events(app, inputs, config):
                 yield sse_encode(ev)
         except Exception as e:
-            yield sse_encode({"type": "error", "message": str(e)})
+            yield sse_encode(
+                {
+                    "type": "error",
+                    "error": classify_exception(e, component="dashboard", operation="stream").model_dump(),
+                }
+            )
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -193,11 +190,17 @@ async def ami_dashboard_resume_stream(request: Request) -> StreamingResponse | J
     """SSE after HITL: continue with MMR λ (same thread_id as initial stream)."""
     thread_id = (request.query_params.get("thread_id") or "").strip()
     if not thread_id:
-        return JSONResponse({"error": "thread_id parameter required"}, status_code=400)
+        return JSONResponse(
+            validation_error("thread_id parameter required", field="thread_id").model_dump(),
+            status_code=400,
+        )
     try:
         lam = float(request.query_params.get("lambda_value", "0.5"))
     except ValueError:
-        return JSONResponse({"error": "invalid lambda_value"}, status_code=400)
+        return JSONResponse(
+            validation_error("invalid lambda_value", field="lambda_value").model_dump(),
+            status_code=400,
+        )
 
     app = get_mcp_workflow()
 
@@ -208,85 +211,162 @@ async def ami_dashboard_resume_stream(request: Request) -> StreamingResponse | J
             ):
                 yield sse_encode(ev)
         except Exception as e:
-            yield sse_encode({"type": "error", "message": str(e)})
+            yield sse_encode(
+                {
+                    "type": "error",
+                    "error": classify_exception(
+                        e, component="dashboard", operation="resume_stream"
+                    ).model_dump(),
+                }
+            )
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @mcp.tool()
-async def research_company(query: str, thread_id: str = "default") -> str:
+async def run_market_research(
+    query: Annotated[
+        str,
+        Field(
+            description=(
+                "Natural-language market-intelligence question: company research, competitor "
+                "analysis, semiconductor or automotive supply chains, products, or market dynamics. "
+                "Not for general chat, weather, or unrelated topics."
+            ),
+        ),
+    ],
+    thread_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Stable conversation identifier for LangGraph checkpointing. Reuse the same value "
+                "for follow-ups in one session and for resume_research after a HITL interrupt."
+            ),
+        ),
+    ] = "default",
+) -> str:
     """
-    Performs grounded research on semiconductor/automotive supply chains.
-    Uses a closed-world graph and vector database to prevent hallucinations.
-    Returns multi-hop relationship paths including entity metadata (headquarters, region)
-    when available, so you can look for location data in the response.
+    Run the full AMI workflow: extract entities → retrieve (graph + vector) → grade → synthesize.
 
-    Use a stable ``thread_id`` per conversation so HITL resume matches the same checkpoint.
+    WHEN TO USE:
+    - User wants a grounded report from the knowledge graph and vector store.
+    - First call in a thread, or any new question that should run the full pipeline.
+
+    WHEN NOT TO USE:
+    - After a HITL interrupt JSON was returned (use resume_research with the same thread_id).
+    - Database health checks (not exposed here).
+
+    RETURNS (always ``str``):
+    - **Normal completion:** Markdown intelligence report (may include entity/location metadata
+      from graph paths). Not JSON on success.
+    - **HITL pause** (only if ``AMI_HITL_DIVERSITY=1``): JSON string with
+      ``{"status":"interrupted","thread_id":...,"interrupt":[...],"hint":...}``.
+      This is a pause, not an error — call resume_research next.
+    - **Error JSON:** ``{"status":"error","error":{ToolError...}}`` on infrastructure/operation failure.
+    - **Empty-result JSON:** ``{"status":"empty_result","empty_result":{...}}`` when policy reports no evidence
+      (not an error — distinct from service failure).
+    - Never returns a bare empty string on operational failure.
+
+    Does not raise MCP exceptions for out-of-scope queries; those are handled inside the workflow text.
     """
+    if not (query or "").strip():
+        return format_mcp_error(
+            validation_error("query must be a non-empty string", field="query"),
+            thread_id=thread_id,
+        )
+
     app = get_mcp_workflow()
-    inputs = make_initial_state(query)
+    inputs = make_initial_state(query.strip())
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
 
     _mcp_progress(f"\n[MCP] Starting workflow for: {query!r} (thread_id={thread_id!r})")
 
-    if _hitl_enabled():
-        result = await app.ainvoke(inputs, config)
-        rd = _normalize_state(result)
-        if rd.get("__interrupt__"):
-            log_workflow_outcome(rd, hitl_interrupted=True)
+    try:
+        if _hitl_enabled():
+            result = await app.ainvoke(inputs, config)
+            merged_state = _normalize_state(result)
+        else:
+            merged_state = await _merge_state_from_astream_events(app, inputs, config)
+            if not (merged_state.get("response") or "").strip():
+                _mcp_progress("[MCP] No response in stream; completing with ainvoke")
+                final = await app.ainvoke(inputs, config)
+                final_d = _event_output_to_dict(final) or {}
+                merged_state.update(final_d)
+
+        hitl = bool(merged_state.get("__interrupt__"))
+        log_workflow_outcome(merged_state, hitl_interrupted=hitl)
+        if hitl:
             _mcp_progress("[MCP] Interrupted — waiting for resume_research(lambda_value=...)\n")
-            return _interrupt_response(rd, thread_id)
-        log_workflow_outcome(rd, hitl_interrupted=False)
-        response = (rd.get("response") or "").strip()
-        _mcp_progress(f"[MCP] Done (response length={len(response)} chars)\n")
-        return response
-
-    merged_state = await _merge_state_from_astream_events(app, inputs, config)
-
-    response = (merged_state.get("response") or "").strip()
-    if not response:
-        _mcp_progress("[MCP] No response in stream; completing with ainvoke")
-        final = await app.ainvoke(inputs, config)
-        final_d = _event_output_to_dict(final) or {}
-        merged_state.update(final_d)
-        response = (merged_state.get("response") or "").strip()
-    log_workflow_outcome(merged_state, hitl_interrupted=False)
-    _mcp_progress(f"[MCP] Done (response length={len(response)} chars)\n")
-    return response
+        else:
+            out = finalize_mcp_workflow_response(merged_state, thread_id)
+            _mcp_progress(f"[MCP] Done (return length={len(out)} chars)\n")
+        return finalize_mcp_workflow_response(merged_state, thread_id)
+    except Exception as e:
+        logger_exc = classify_exception(e, component="mcp", operation="run_market_research")
+        _mcp_progress(f"[MCP] Error: {logger_exc.message}\n")
+        return format_mcp_error(logger_exc, thread_id=thread_id)
 
 
 @mcp.tool()
-async def resume_research(thread_id: str, lambda_value: float) -> str:
+async def resume_research(
+    thread_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Same thread_id passed to run_market_research when it returned "
+                'JSON with status="interrupted".'
+            ),
+        ),
+    ],
+    lambda_value: Annotated[
+        float,
+        Field(
+            ge=0.0,
+            le=1.0,
+            description=(
+                "MMR diversity weight for re-ranking retrieved chunks: 1.0 = relevance-only; "
+                "0.0 = maximum diversity among candidates."
+            ),
+        ),
+    ],
+) -> str:
     """
-    Resume after HITL interrupt: pass the same ``thread_id`` and MMR λ in [0.0, 1.0].
-    Requires ``AMI_HITL_DIVERSITY=1`` and a prior ``research_company`` call that interrupted.
+    Continue a paused workflow after human-in-the-loop MMR selection.
 
-    Uses ``astream_events`` so stderr shows the same ``Node start:`` lines as the non-HITL path
-    (re-fetch, grader, synthesis, …). Do not call ``ainvoke(Command(resume))`` again after —
-    that would consume a second resume.
+    WHEN TO USE:
+    - Prior run_market_research returned JSON with ``status`` = ``"interrupted"``.
+    - Server has ``AMI_HITL_DIVERSITY`` enabled.
+
+    WHEN NOT TO USE:
+    - New user question (use run_market_research).
+    - HITL disabled on the server (no matching checkpoint interrupt).
+
+    RETURNS (always ``str``):
+    - Same contract as run_market_research (Markdown, interrupt JSON, error JSON, or empty_result JSON).
     """
+    if not (thread_id or "").strip():
+        return format_mcp_error(
+            validation_error("thread_id must be a non-empty string", field="thread_id"),
+        )
+
     app = get_mcp_workflow()
     config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     lam = float(lambda_value)
     _mcp_progress(f"\n[MCP] Resuming thread {thread_id!r} with λ={lam}\n")
 
-    merged_state = await _merge_state_from_astream_events(
-        app, Command(resume=lam), config
-    )
-
-    if merged_state.get("__interrupt__"):
-        log_workflow_outcome(merged_state, hitl_interrupted=True)
-        return _interrupt_response(merged_state, thread_id)
-
-    log_workflow_outcome(merged_state, hitl_interrupted=False)
-    response = (merged_state.get("response") or "").strip()
-    if not response:
-        _mcp_progress(
-            "[MCP] No response in merged stream state after resume (check graph output)\n"
+    try:
+        merged_state = await _merge_state_from_astream_events(
+            app, Command(resume=lam), config
         )
-    else:
-        _mcp_progress(f"[MCP] Resume done (response length={len(response)} chars)\n")
-    return response
+        hitl = bool(merged_state.get("__interrupt__"))
+        log_workflow_outcome(merged_state, hitl_interrupted=hitl)
+        out = finalize_mcp_workflow_response(merged_state, thread_id)
+        _mcp_progress(f"[MCP] Resume done (return length={len(out)} chars)\n")
+        return out
+    except Exception as e:
+        err = classify_exception(e, component="mcp", operation="resume_research")
+        _mcp_progress(f"[MCP] Resume error: {err.message}\n")
+        return format_mcp_error(err, thread_id=thread_id)
 
 
 if __name__ == "__main__":

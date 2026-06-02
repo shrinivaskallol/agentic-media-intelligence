@@ -16,31 +16,34 @@ from app.nodes.evaluator import evaluation_node
 from app.nodes.extraction import entity_extractor
 from app.nodes.fallback import fallback_node
 from app.nodes.grader import grader_node
+from app.nodes.human_review import human_review_node
 from app.nodes.refusal import refusal_node
 from app.nodes.retriever import hybrid_retrieval_node
 from app.nodes.rewrite import rewrite_node
 from app.nodes.synthesis import synthesis_node
 from app.state.schema import GraphState
 from app.utils.node_timing import timed_node
-from app.utils.routing import route_after_eval
+from app.policies.escalation import detect_human_request, evaluate_escalation
+from app.utils.routing import route_after_eval, synthesis_routes_to_critique
 
 
 def _after_synthesis_route(state: GraphState | dict) -> str:
     """
-    Route synthesis output. REFUSAL goes to critique (not fallback) to force
-    at least one Self-Correction attempt before giving up.
+    Route synthesis output via structured fields (insufficient_data, invalid_structured_output) or requires_critique → critique.
     """
-    response = getattr(state, "response", None) or (
-        state.get("response", "") if isinstance(state, dict) else ""
-    )
-    if "REFUSAL: INSUFFICIENT_DATA" in (response or ""):
-        logger.info("REFUSAL: Routing to critique for Self-Correction attempt")
+    if synthesis_routes_to_critique(state):
+        logger.info("SYNTHESIS: structured signal → Critique (self-correction)")
         return "critique"
     return "evaluator"
 
 
 def _route_after_eval(state: GraphState | dict) -> str:
     """Delegate to routing module; add logging."""
+    escalate, reason = evaluate_escalation(state)
+    if escalate:
+        logger.info("POLICY: escalating to human_review after eval (%s)", reason)
+        return "human_review"
+
     result = route_after_eval(state)
     ragas = getattr(state, "ragas_scores", None) or (
         state.get("ragas_scores") if isinstance(state, dict) else None
@@ -60,7 +63,7 @@ def _route_after_eval(state: GraphState | dict) -> str:
 
 def _should_continue(state: GraphState | dict) -> str:
     """
-    Quality gate: REFUSAL or max revisions -> fallback; score >= 0.85 -> finish; else refine.
+    Quality gate: synthesis self-correction branch or max revisions -> fallback; score >= 0.85 -> finish; else refine.
     """
     response = getattr(state, "response", None) or (
         state.get("response", "") if isinstance(state, dict) else ""
@@ -75,14 +78,19 @@ def _should_continue(state: GraphState | dict) -> str:
         count = state.get("revision_count", 0)
     count = count if count is not None else 0
 
-    # On REFUSAL: force one self-correction (Critique → Synthesis) before fallback.
-    # After Critique runs, revision_count becomes 1; only then allow fallback on subsequent REFUSAL.
-    if "REFUSAL: INSUFFICIENT_DATA" in (response or ""):
+    escalate, reason = evaluate_escalation(state)
+    if escalate:
+        logger.info("POLICY: escalating to human_review from critique gate (%s)", reason)
+        return "human_review"
+
+    # Synthesis signals that need critique/refine before fallback (insufficient_data, invalid output, or explicit flag).
+    if synthesis_routes_to_critique(state):
         if count >= 2:
-            logger.info("REFUSAL: After self-correction attempt; falling back to evidence-only")
+            logger.info(
+                "SYNTHESIS self-correction: max attempts for this branch; falling back"
+            )
             return "fallback"
-        # revision_count 0 or 1: force self-correction (Critique → Synthesis)
-        logger.info("REFUSAL: Forcing self-correction (Critique → Synthesis)")
+        logger.info("SYNTHESIS self-correction: forcing Critique → Synthesis refine")
         return "refine"
     if count >= 3:
         logger.info("HARD STOP: Max revisions (3) reached; falling back to evidence-only")
@@ -134,6 +142,13 @@ def _grader_route(state: GraphState | dict) -> str:
 
 def router_logic(state: GraphState | dict) -> str:
     """After extractor: out-of-scope → refusal; IRRELEVANT → END; else retrieve."""
+    query = getattr(state, "query", None) or (
+        state.get("query", "") if isinstance(state, dict) else ""
+    )
+    if detect_human_request(str(query or "")):
+        logger.info("POLICY: user requested human — routing to human_review")
+        return "human_review"
+
     exit_reason = getattr(state, "exit_reason", None) or (
         state.get("exit_reason", "") if isinstance(state, dict) else ""
     )
@@ -176,6 +191,7 @@ def build_workflow(checkpointer=None):
     workflow.add_node("evaluator", timed_node(evaluation_node, "evaluator"))
     workflow.add_node("critique", timed_node(critique_node, "critique"))
     workflow.add_node("fallback", timed_node(fallback_node, "fallback"))
+    workflow.add_node("human_review", timed_node(human_review_node, "human_review"))
 
     workflow.set_entry_point("extractor")
 
@@ -186,6 +202,7 @@ def build_workflow(checkpointer=None):
             "continue": "retrieve",
             "end": END,
             "refusal": "refusal",
+            "human_review": "human_review",
         },
     )
     workflow.add_edge("refusal", END)
@@ -223,6 +240,7 @@ def build_workflow(checkpointer=None):
         {
             "critique": "critique",
             "finish": END,
+            "human_review": "human_review",
         },
     )
     workflow.add_conditional_edges(
@@ -232,9 +250,11 @@ def build_workflow(checkpointer=None):
             "refine": "synthesis",
             "fallback": "fallback",
             "finish": END,
+            "human_review": "human_review",
         },
     )
     workflow.add_edge("fallback", END)
+    workflow.add_edge("human_review", END)
 
     return workflow.compile(checkpointer=checkpointer if checkpointer is not None else False)
 

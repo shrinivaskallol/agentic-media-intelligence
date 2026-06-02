@@ -7,6 +7,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
+from app.errors.llm_invoke import llm_failure_patch
 from app.llm_factory import get_critique_llm
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,10 @@ class CritiqueOutput(BaseModel):
         le=1.0,
     )
     feedback: str = Field(
-        description="Bulleted list of corrections, or 'PASS' if score is 1.0.",
+        description=(
+            "Bulleted list of specific corrections, or 'PASS' if score >= 0.85 with no "
+            "grounding or category errors."
+        ),
     )
 
 
@@ -106,7 +110,20 @@ def critique_node(state: GraphState | dict) -> dict:
         report=report,
         context=context,
     )
-    result = structured_llm.invoke(prompt)
+    try:
+        result = structured_llm.invoke(prompt)
+    except Exception as e:
+        logger.warning("CRITIQUE LLM failed: %s", e)
+        patch = llm_failure_patch(e, component="critique")
+        patch.update(
+            {
+                "critique": "LLM critique unavailable; prior report needs human review.",
+                "critique_score": 0.0,
+                "revision_count": 1,
+            }
+        )
+        return patch
+
     score = float(result.score) if hasattr(result, "score") else 0.0
     feedback = result.feedback if hasattr(result, "feedback") else str(result)
 

@@ -13,6 +13,8 @@ from typing import Any
 
 from langgraph.types import Command
 
+from app.errors.helpers import classify_exception, tool_response_from_state
+
 
 def event_output_to_dict(output: Any) -> dict | None:
     if output is None:
@@ -137,9 +139,16 @@ async def iter_workflow_dashboard_events(
         else:
             done_status = "partial"
 
-        yield {"type": "done", "status": done_status, "state": safe_state}
+        envelope = tool_response_from_state(merged_state)
+        yield {
+            "type": "done",
+            "status": done_status,
+            "state": safe_state,
+            "tool_response": envelope.model_dump(),
+        }
     except Exception as e:
-        yield {"type": "error", "message": str(e)}
+        err = classify_exception(e, component="dashboard", operation="workflow_stream")
+        yield {"type": "error", "error": err.model_dump(), "message": err.message}
         raise
 
 

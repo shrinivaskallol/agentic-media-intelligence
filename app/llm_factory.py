@@ -9,6 +9,8 @@ import time
 
 from langchain_core.runnables import Runnable
 
+from app.errors.exceptions import LLMInvocationError
+from app.errors.helpers import classify_exception
 from app.config.models import (
     get_gemini_api_key,
     get_gemini_fallback_key,
@@ -24,6 +26,30 @@ logger = logging.getLogger(__name__)
 
 # Global circuit breaker: flip to False when Gemini hits 429; then skip Gemini entirely
 GEMINI_AVAILABLE = True
+
+
+def _backoff_before_fallback(exc: BaseException, attempt: int) -> None:
+    """Sleep when ``is_retryable`` on the classified error (rate limit, timeout, etc.)."""
+    err = classify_exception(exc, component="llm_factory", operation="fallback")
+    if not err.is_retryable:
+        return
+    delay = min(0.6 * (2**attempt), 8.0)
+    logger.info(
+        "[Fallback] retryable %s — backing off %.1fs (attempt %d)",
+        err.error_category,
+        delay,
+        attempt + 1,
+    )
+    time.sleep(delay)
+
+
+def _raise_llm_failure(exc: BaseException, *, operation: str) -> None:
+    """Raise LLMInvocationError with classified ToolError for graph nodes to capture."""
+    if isinstance(exc, LLMInvocationError):
+        raise exc
+    raise LLMInvocationError(
+        classify_exception(exc, component="llm_factory", operation=operation)
+    ) from exc
 
 
 def _is_fallback_error(exc: BaseException) -> bool:
@@ -191,12 +217,18 @@ class FallbackLLM(Runnable):
                     logger.warning("[Fallback] 429/413 on %s, trying next", label)
                     if "gemini" in label.lower():
                         GEMINI_AVAILABLE = False  # Only skip Gemini when Gemini itself fails
-                    time.sleep(0.6)  # Let TPM bucket refill before next candidate
+                    _backoff_before_fallback(e, i)
                     continue
-                raise
+                _raise_llm_failure(e, operation="invoke")
         if last_error:
-            raise last_error
-        raise RuntimeError("All LLM candidates failed")
+            _raise_llm_failure(last_error, operation="invoke")
+        raise LLMInvocationError(
+            classify_exception(
+                RuntimeError("All LLM candidates failed"),
+                component="llm_factory",
+                operation="invoke",
+            )
+        )
 
     def with_structured_output(self, schema, **kwargs):
         """
@@ -235,12 +267,18 @@ class FallbackStructuredRunnable(Runnable):
                     logger.warning("[Fallback] 429/413 on %s (structured), trying next", label)
                     if "gemini" in label.lower():
                         GEMINI_AVAILABLE = False  # Only skip Gemini when Gemini itself fails
-                    time.sleep(0.6)  # Let TPM bucket refill before next candidate
+                    _backoff_before_fallback(e, i)
                     continue
-                raise
+                _raise_llm_failure(e, operation="invoke_structured")
         if last_error:
-            raise last_error
-        raise RuntimeError("All LLM candidates failed")
+            _raise_llm_failure(last_error, operation="invoke_structured")
+        raise LLMInvocationError(
+            classify_exception(
+                RuntimeError("All LLM candidates failed"),
+                component="llm_factory",
+                operation="invoke_structured",
+            )
+        )
 
 
 def get_llm(structured: bool = False):
